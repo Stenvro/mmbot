@@ -1,0 +1,32 @@
+export default function Sidebar({ activeView, setActiveView, selectedDataset, closeChart }) {
+  return (
+    <div className="w-64 bg-[#181a20] border-r border-[#2b3139] flex flex-col">
+      <div className="p-5 border-b border-[#2b3139]">
+        <h1 className="text-xl font-bold tracking-widest text-white">
+          APEX<span className="text-[#fcd535]">ALGO</span>
+        </h1>
+        <p className="text-[#848e9c] text-xs mt-1 uppercase tracking-wider">Algorithmic Engine</p>
+      </div>
+      
+      <nav className="flex-1 p-3 space-y-2 mt-2">
+        <button 
+          onClick={() => setActiveView('manager')}
+          className={`w-full text-left px-4 py-2.5 text-sm font-medium rounded transition-colors ${activeView === 'manager' ? 'bg-[#2b3139] text-white' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}
+        >
+          Data Manager
+        </button>
+        
+        {selectedDataset && (
+          <div className={`flex items-center justify-between px-4 py-2.5 text-sm font-medium rounded transition-colors ${activeView === 'chart' ? 'bg-[#2b3139] text-white' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}>
+            <button className="flex-1 text-left" onClick={() => setActiveView('chart')}>
+                Chart View <span className="text-xs text-[#fcd535] ml-2">{selectedDataset.symbol}</span>
+            </button>
+            <button onClick={closeChart} className="text-[#848e9c] hover:text-[#f6465d] ml-2 px-1 transition-colors">
+              ✕
+            </button>
+          </div>
+        )}
+      </nav>
+    </div>
+  );
+}

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+mmbot_venv/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.npm/
+
+.env
+data/
+*.sqlite3
+*.db
+
+.DS_Store
