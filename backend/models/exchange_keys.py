@@ -6,7 +6,8 @@ class ExchangeKey(Base):
     __tablename__ = "exchange_keys"
 
     id = Column(Integer, primary_key=True, index=True)
-    exchange = Column(String, default="okx", unique=True)
+    name = Column(String, unique=True, nullable=False)
+    exchange = Column(String, default="okx")
     api_key = Column(String, nullable=False)
     api_secret = Column(String, nullable=False)
     passphrase = Column(String, nullable=False)
