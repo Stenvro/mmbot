@@ -64,7 +64,6 @@ def get_price(symbol: str):
 
 @app.post("/api/keys", dependencies=[Depends(verify_api_key)])
 def save_exchange_keys(req: ExchangeKeyCreate, db: Session = Depends(get_db)):
-    # 1. KEIHARDE VALIDATIE VOORAF
     try:
         test_exchange = ccxt.okx({
             'apiKey': req.api_key,
@@ -80,10 +79,8 @@ def save_exchange_keys(req: ExchangeKeyCreate, db: Session = Depends(get_db)):
         test_exchange.fetch_balance()
         
     except Exception as e:
-        # Als dit faalt, crasht het request hier en slaat hij NIETS op.
         raise HTTPException(status_code=400, detail=f"OKX Connection Rejected: {str(e)}")
 
-    # 2. ALS WE HIER ZIJN, WERKT DE SLEUTEL 100%. NU PAS OPSLAAN.
     try:
         enc_key = encrypt_data(req.api_key)
         enc_secret = encrypt_data(req.api_secret)
@@ -153,6 +150,46 @@ def get_exchange_keys_status(db: Session = Depends(get_db)):
         
     return result
 
+# --- HET NIEUWE BALANCE ENDPOINT ---
+@app.get("/api/keys/{key_name}/balance", dependencies=[Depends(verify_api_key)])
+def get_key_balance(key_name: str, db: Session = Depends(get_db)):
+    key_record = db.query(ExchangeKey).filter(ExchangeKey.name == key_name).first()
+    if not key_record:
+        raise HTTPException(status_code=404, detail=f"Key '{key_name}' not found.")
+    
+    try:
+        dec_key = decrypt_data(key_record.api_key)
+        dec_secret = decrypt_data(key_record.api_secret)
+        dec_passphrase = decrypt_data(key_record.passphrase)
+        
+        test_exchange = ccxt.okx({
+            'apiKey': dec_key,
+            'secret': dec_secret,
+            'password': dec_passphrase,
+            'enableRateLimit': True,
+            'hostname': 'eea.okx.com'
+        })
+        
+        if key_record.is_sandbox:
+            test_exchange.set_sandbox_mode(True)
+            
+        balance_data = test_exchange.fetch_balance()
+        
+        # Filter alleen de munten waar je daadwerkelijk saldo van hebt
+        active_balances = {}
+        if 'total' in balance_data:
+            for coin, amount in balance_data['total'].items():
+                if amount > 0:
+                    active_balances[coin] = {
+                        "free": balance_data['free'].get(coin, 0),
+                        "used": balance_data['used'].get(coin, 0),
+                        "total": amount
+                    }
+                    
+        return {"name": key_name, "balances": active_balances}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch balance: {str(e)}")
+
 @app.delete("/api/keys/{key_name}", dependencies=[Depends(verify_api_key)])
 def delete_exchange_keys(key_name: str, db: Session = Depends(get_db)):
     try:
@@ -168,13 +205,12 @@ def delete_exchange_keys(key_name: str, db: Session = Depends(get_db)):
 @app.post("/api/data/fetch/{symbol}", dependencies=[Depends(verify_api_key)])
 def fetch_historical_data(
     symbol: str,
-    req: HistoricalDataFetch,  # <-- HIER GEBRUIKEN WE NU HET SCHEMA
+    req: HistoricalDataFetch,
     db: Session = Depends(get_db)
 ):
     try:
         formatted_symbol = symbol.replace('-', '/').upper()
         
-        # We halen de data nu uit het 'req' object
         start_ts = int(req.start_date.timestamp() * 1000)
         end_ts = int(req.end_date.timestamp() * 1000)
 
