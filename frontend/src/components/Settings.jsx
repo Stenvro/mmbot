@@ -214,6 +214,9 @@ export default function Settings({ setError }) {
             <button type="submit" disabled={loading} className="w-full bg-[#fcd535] text-[#181a20] px-6 py-2.5 text-sm font-semibold hover:bg-[#e5c02a] disabled:opacity-50 transition-colors rounded-sm">
               {loading ? 'Verifying...' : 'Verify & Save Securely'}
             </button>
+            <p className="text-center text-[#848e9c] text-xs mt-3">
+              Check key integrity and save using Fernet encryption.
+            </p>
           </div>
         </form>
       </div>

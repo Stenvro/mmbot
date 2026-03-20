@@ -6,23 +6,31 @@ import Settings from './components/Settings';
 
 export default function App() {
   const [activeView, setActiveView] = useState('manager');
-  const [selectedDataset, setSelectedDataset] = useState(null);
+  const [openCharts, setOpenCharts] = useState([]);
   const [error, setError] = useState(null);
 
-  const openChart = (dataset) => {
-    setSelectedDataset(dataset);
-    setActiveView('chart');
+  const handleOpenChart = (dataset) => {
+    const chartId = `${dataset.symbol}_${dataset.timeframe}`;
+    
+    if (!openCharts.find(c => c.id === chartId)) {
+      setOpenCharts(prev => [...prev, { ...dataset, id: chartId }]);
+    }
+    setActiveView(chartId);
   };
 
-  const closeChart = () => {
-    setSelectedDataset(null);
-    setActiveView('manager');
+  const closeChart = (chartId, e) => {
+    e.stopPropagation();
+    setOpenCharts(prev => prev.filter(c => c.id !== chartId));
+    if (activeView === chartId) {
+      setActiveView('manager');
+    }
   };
 
   const getHeaderTitle = () => {
     if (activeView === 'manager') return 'Market Data Vault';
     if (activeView === 'settings') return 'Exchange Configuration';
-    if (activeView === 'chart') return `${selectedDataset?.symbol} | ${selectedDataset?.timeframe}`;
+    const activeChart = openCharts.find(c => c.id === activeView);
+    if (activeChart) return `${activeChart.symbol} | ${activeChart.timeframe}`;
     return '';
   };
 
@@ -32,7 +40,7 @@ export default function App() {
       <Sidebar 
         activeView={activeView} 
         setActiveView={setActiveView} 
-        selectedDataset={selectedDataset} 
+        openCharts={openCharts} 
         closeChart={closeChart} 
       />
 
@@ -52,18 +60,20 @@ export default function App() {
 
         <main className="flex-1 overflow-auto p-6 flex flex-col relative">
           {activeView === 'manager' && (
-             <DataManager openChart={openChart} setError={setError} />
+             <DataManager openChart={handleOpenChart} setError={setError} />
           )}
 
           {activeView === 'settings' && (
              <Settings setError={setError} />
           )}
 
-          {activeView === 'chart' && selectedDataset && (
-            <div className="flex-1 w-full border border-[#2b3139] rounded overflow-hidden shadow-2xl relative">
-               <ChartEngine dataset={selectedDataset} />
-            </div>
-          )}
+          {openCharts.map(chart => (
+            activeView === chart.id && (
+              <div key={chart.id} className="flex-1 w-full border border-[#2b3139] rounded overflow-hidden shadow-2xl relative">
+                 <ChartEngine dataset={chart} />
+              </div>
+            )
+          ))}
         </main>
       </div>
     </div>
