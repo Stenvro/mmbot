@@ -1,16 +1,32 @@
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-mmbot_venv/
-
-frontend/node_modules/
-frontend/dist/
-frontend/.npm/
-
+# --- SECURITY & CONFIG ---
 .env
-data/
+.env.*
+*.pem
+
+# --- DATABASE ---
+*.sqlite
 *.sqlite3
 *.db
+*.db3
+data/
 
+# --- PYTHON BACKEND ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+mmbot_venv/
+.pytest_cache/
+
+# --- FRONTEND (REACT/VITE) ---
+node_modules/
+dist/
+build/
+.npm/
+
+# --- IDE & OS ---
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
