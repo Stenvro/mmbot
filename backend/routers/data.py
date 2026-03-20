@@ -113,3 +113,21 @@ def get_candles(symbol: str, x_timeframe: str = Header(...), db: Session = Depen
     ).order_by(Candle.timestamp.asc()).all()
 
     return [{"time": int(c.timestamp.replace(tzinfo=timezone.utc).timestamp()), "open": c.open, "high": c.high, "low": c.low, "close": c.close, "value": c.volume} for c in candles]
+
+# --- NIEUW: MARKET INFO ENDPOINT VOOR DE HUD ---
+@router.get("/market-info/{symbol}")
+def get_market_info(symbol: str):
+    try:
+        formatted_symbol = symbol.replace('-', '/').upper()
+        ticker = exchange.fetch_ticker(formatted_symbol)
+        
+        return {
+            "symbol": formatted_symbol,
+            "last": ticker.get('last', 0),
+            "change_24h": ticker.get('percentage', 0),
+            "high_24h": ticker.get('high', 0),
+            "low_24h": ticker.get('low', 0),
+            "vol_24h": ticker.get('baseVolume', 0)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch market info: {str(e)}")

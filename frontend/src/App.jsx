@@ -26,14 +26,6 @@ export default function App() {
     }
   };
 
-  const getHeaderTitle = () => {
-    if (activeView === 'manager') return 'Market Data Vault';
-    if (activeView === 'settings') return 'Exchange Configuration';
-    const activeChart = openCharts.find(c => c.id === activeView);
-    if (activeChart) return `${activeChart.symbol} | ${activeChart.timeframe}`;
-    return '';
-  };
-
   return (
     <div className="flex h-screen bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30">
       
@@ -45,14 +37,18 @@ export default function App() {
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-6">
-          <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide">
-            {getHeaderTitle()}
-          </h2>
-        </header>
+        
+        {/* FIX: Header wordt alleen getoond bij Settings of Data Manager */}
+        {(activeView === 'manager' || activeView === 'settings') && (
+          <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-6 shrink-0">
+            <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide">
+              {activeView === 'manager' ? 'Market Data Vault' : 'Exchange Configuration'}
+            </h2>
+          </header>
+        )}
 
         {error && (
-          <div className="m-4 p-3 bg-[#f6465d]/10 border border-[#f6465d]/50 text-[#f6465d] text-sm rounded shadow-sm flex justify-between items-center">
+          <div className="m-4 p-3 bg-[#f6465d]/10 border border-[#f6465d]/50 text-[#f6465d] text-sm rounded shadow-sm flex justify-between items-center shrink-0">
             <span>{error}</span>
             <button className="text-[#f6465d] hover:text-white" onClick={() => setError(null)}>✕</button>
           </div>
