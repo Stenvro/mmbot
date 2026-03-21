@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-// FIX: We importeren nu specifiek CandlestickSeries, HistogramSeries en LineSeries voor v5!
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { apiClient } from '../api/client';
 
 const safeParseTime = (ts) => {
@@ -30,6 +29,7 @@ export default function ChartEngine({ dataset }) {
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
   const indicatorSeriesRef = useRef({}); 
+  const markersPluginRef = useRef(null); 
   const lastCandleRef = useRef(null); 
   const isCrosshairActive = useRef(false);
 
@@ -78,11 +78,27 @@ export default function ChartEngine({ dataset }) {
       const sigRes = await apiClient.get(`/api/bots/signals`, {
         params: { symbol: dataset.symbol, timeframe: dataset.timeframe }
       });
-      
-      const fetchedData = sigRes.data || [];
-      setSignals(fetchedData);
+      setSignals(sigRes.data || []);
     } catch (e) { console.error("Signal Fetch Error:", e); }
   };
+
+  // Lookup-map om razendsnel de extra data te vinden als de muis beweegt
+  const signalMapByTime = useMemo(() => {
+    const map = {};
+    signals.forEach(sig => {
+      const t = safeParseTime(sig.timestamp);
+      if (!t) return;
+      if (!map[t]) map[t] = {};
+      
+      let parsedExtra = {};
+      try {
+        parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {});
+      } catch (e) {}
+
+      map[t][sig.bot_name] = { ...sig, extra_data: parsedExtra };
+    });
+    return map;
+  }, [signals]);
 
   const applyInitialDataToChart = (rawData) => {
     if (!rawData || rawData.length === 0) return;
@@ -108,6 +124,9 @@ export default function ChartEngine({ dataset }) {
       
       if (uniqueData.length > 0) {
         lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
+        if (!isCrosshairActive.current) {
+             setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
+        }
       }
     } catch (e) { console.error("Data Load Crash Prevented:", e); }
   };
@@ -132,7 +151,8 @@ export default function ChartEngine({ dataset }) {
                 value: latestDbCandle.volume || latestDbCandle.value,
                 color: latestDbCandle.close >= latestDbCandle.open ? '#2ebd8580' : '#f6465d80'
             });
-            const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value };
+            const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value, time: latestDbCandle.time };
+            
             if (!isCrosshairActive.current) setHoverData(newHoverState);
             
             const isFresh = (Date.now() / 1000) - latestDbCandle.time < 180;
@@ -166,12 +186,12 @@ export default function ChartEngine({ dataset }) {
         });
         chartRef.current = chart;
 
-        // V5 API FIX: 'addSeries(CandlestickSeries, ...)' in plaats van 'addCandlestickSeries'
         candleSeriesRef.current = chart.addSeries(CandlestickSeries, {
           upColor: '#2ebd85', downColor: '#f6465d', borderVisible: false, wickUpColor: '#2ebd85', wickDownColor: '#f6465d'
         });
         
-        // V5 API FIX: 'addSeries(HistogramSeries, ...)' in plaats van 'addHistogramSeries'
+        markersPluginRef.current = createSeriesMarkers(candleSeriesRef.current, []);
+
         volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
         volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
@@ -190,14 +210,14 @@ export default function ChartEngine({ dataset }) {
         chart.subscribeCrosshairMove((param) => {
           if (!param.point || !param.time || param.point.x < 0 || param.point.y < 0) {
             isCrosshairActive.current = false;
-            if (lastCandleRef.current) setHoverData(lastCandleRef.current);
+            if (lastCandleRef.current) setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
             return;
           }
           isCrosshairActive.current = true;
           const dCandle = param.seriesData.get(candleSeriesRef.current);
           const dVol = param.seriesData.get(volumeSeriesRef.current);
           if (dCandle) {
-             setHoverData({ ...dCandle, value: dVol ? dVol.value : 0 });
+             setHoverData({ ...dCandle, value: dVol ? dVol.value : 0, time: param.time });
           }
         });
       } catch (error) {
@@ -220,12 +240,12 @@ export default function ChartEngine({ dataset }) {
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current || signals.length === 0) return;
     
-    // --- 1. TEKEN MARKERS ---
     const markersByTime = {};
     signals.forEach(sig => {
       if (botConfigs[sig.bot_name]?.showMarkers && (sig.action === 'buy' || sig.action === 'sell')) {
         const markerTime = safeParseTime(sig.timestamp);
         if (!markerTime) return; 
+
         if (!markersByTime[markerTime]) markersByTime[markerTime] = [];
         markersByTime[markerTime].push(sig);
       }
@@ -239,26 +259,21 @@ export default function ChartEngine({ dataset }) {
         const sellSigs = sigsAtTime.filter(s => s.action === 'sell');
         
         if (buySigs.length > 0) finalMarkers.push({
-            time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp',
-            text: buySigs.length > 1 ? `BUY (${buySigs.length})` : `BUY (${buySigs[0].bot_name})`
+            time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp', text: 'B'
         });
         if (sellSigs.length > 0) finalMarkers.push({
-            time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown',
-            text: sellSigs.length > 1 ? `SELL (${sellSigs.length})` : `SELL (${sellSigs[0].bot_name})`
+            time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown', text: 'S'
         });
     });
 
     finalMarkers.sort((a, b) => a.time - b.time);
     
     try { 
-      if (typeof candleSeriesRef.current.setMarkers === 'function') {
-        candleSeriesRef.current.setMarkers(finalMarkers); 
+      if (markersPluginRef.current) {
+        markersPluginRef.current.setMarkers(finalMarkers); 
       }
-    } catch (e) { 
-      console.error("[CRITICAL] Marker Render Crash:", e); 
-    }
+    } catch (e) { console.error("[CRITICAL] Marker Render Crash:", e); }
 
-    // --- 2. TEKEN INDICATOR LIJNEN ---
     Object.keys(botConfigs).forEach(botName => {
         const config = botConfigs[botName];
         
@@ -269,7 +284,6 @@ export default function ChartEngine({ dataset }) {
             if (isActive) {
                 if (!indicatorSeriesRef.current[seriesId]) {
                     const isOscillator = /RSI|MACD|MFI|CCI|STOCH|ATR/i.test(indKey);
-                    // V5 API FIX: 'addSeries(LineSeries, ...)' in plaats van 'addLineSeries'
                     indicatorSeriesRef.current[seriesId] = chartRef.current.addSeries(LineSeries, {
                         color: getColor(seriesId),
                         lineWidth: 2,
@@ -293,10 +307,7 @@ export default function ChartEngine({ dataset }) {
                         if (parsedExtra[indKey] !== undefined && parsedExtra[indKey] !== null) {
                             const t = safeParseTime(sig.timestamp);
                             const val = Number(parsedExtra[indKey]); 
-                            
-                            if (t && !isNaN(val)) {
-                                dataMap.set(t, val); 
-                            }
+                            if (t && !isNaN(val)) dataMap.set(t, val); 
                         }
                     }
                 });
@@ -312,9 +323,7 @@ export default function ChartEngine({ dataset }) {
                   } else {
                       series.applyOptions({ visible: false });
                   }
-                } catch(e) {
-                   console.error(`[CRITICAL] Line Render Crash for ${seriesId}:`, e);
-                }
+                } catch(e) { console.error(`[CRITICAL] Line Render Crash for ${seriesId}:`, e); }
 
             } else {
                 if (indicatorSeriesRef.current[seriesId]) {
@@ -337,13 +346,7 @@ export default function ChartEngine({ dataset }) {
   const toggleIndicatorConfig = (targetBotName, indKey) => {
       setBotConfigs(prev => {
           const newState = JSON.parse(JSON.stringify(prev));
-          const targetState = !newState[targetBotName].indicators[indKey];
-          
-          for (const bName in newState) {
-              if (newState[bName].indicators[indKey] !== undefined) {
-                  newState[bName].indicators[indKey] = targetState;
-              }
-          }
+          newState[targetBotName].indicators[indKey] = !newState[targetBotName].indicators[indKey];
           return newState;
       });
   };
@@ -459,14 +462,35 @@ export default function ChartEngine({ dataset }) {
         {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>}
         {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>}
         
+        {/* HUD met dynamische flex-wrap */}
         {hoverData && !loading && !errorMsg && (
-          <div className="absolute top-3 left-3 z-10 bg-[#181a20]/80 backdrop-blur-sm border border-[#2b3139] p-2 rounded-sm text-xs font-mono pointer-events-none shadow-lg">
-            <div className="flex space-x-3">
+          <div className="absolute top-3 left-3 z-10 bg-[#181a20]/80 backdrop-blur-sm border border-[#2b3139] p-2 rounded-sm text-xs font-mono pointer-events-none shadow-lg max-w-[80%] flex flex-wrap gap-y-2">
+            <div className="flex space-x-3 items-center flex-wrap gap-y-2">
               <div className="flex space-x-1"><span className="text-[#848e9c]">O</span><span className={hoverData.open > hoverData.close ? 'text-[#f6465d]' : 'text-[#2ebd85]'}>{formatNum(hoverData.open)}</span></div>
               <div className="flex space-x-1"><span className="text-[#848e9c]">H</span><span className="text-[#eaecef]">{formatNum(hoverData.high)}</span></div>
               <div className="flex space-x-1"><span className="text-[#848e9c]">L</span><span className="text-[#eaecef]">{formatNum(hoverData.low)}</span></div>
               <div className="flex space-x-1"><span className="text-[#848e9c]">C</span><span className={hoverData.close >= hoverData.open ? 'text-[#2ebd85]' : 'text-[#f6465d]'}>{formatNum(hoverData.close)}</span></div>
-              <div className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1"><span className="text-[#848e9c]">V</span><span className="text-[#fcd535]">{formatNum(hoverData.value)}</span></div>
+              <div className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1"><span className="text-[#848e9c]">V</span><span className="text-[#eaecef]">{formatNum(hoverData.value)}</span></div>
+              
+              {/* DYNAMISCHE INDICATOREN */}
+              {Object.keys(botConfigs).map(botName => {
+                  const config = botConfigs[botName];
+                  const activeInds = Object.keys(config.indicators).filter(k => config.indicators[k]);
+                  if (activeInds.length === 0 || !hoverData.time) return null;
+                  
+                  const botDataAtTime = signalMapByTime[hoverData.time]?.[botName]?.extra_data || {};
+                  
+                  return activeInds.map(indKey => {
+                      const val = botDataAtTime[indKey];
+                      if (val === undefined) return null;
+                      return (
+                          <div key={`${botName}-${indKey}`} className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1 items-center">
+                              <span className="text-[#848e9c] text-[10px] uppercase">{indKey}</span>
+                              <span className="text-[#fcd535]">{formatNum(val)}</span>
+                          </div>
+                      );
+                  });
+              })}
             </div>
           </div>
         )}

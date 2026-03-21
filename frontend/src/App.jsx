@@ -12,10 +12,10 @@ export default function App() {
   const [runningBots, setRunningBots] = useState([]);
   const [error, setError] = useState(null);
 
-  // Fetch running bots for the sidebar
+  // DE 307 REDIRECT FIX: Trailing slash toegevoegd bij /api/bots/
   const fetchRunningBots = async () => {
     try {
-      const res = await apiClient.get('/api/bots');
+      const res = await apiClient.get('/api/bots/');
       const active = res.data.filter(b => b.is_active);
       setRunningBots(active);
     } catch (err) {
@@ -64,7 +64,7 @@ export default function App() {
           <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-6 shrink-0">
             <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
               {activeView === 'manager' ? 'Market Data Vault' : 
-               activeView === 'bots' ? 'Algorithm Manager' : 
+               activeView === 'bots' ? 'Trading Bots' : 
                'Exchange Configuration'}
             </h2>
           </header>
@@ -77,7 +77,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Padding and scrolling applied globally to the main view container */}
         <main className="flex-1 overflow-auto flex flex-col relative">
           
           {activeView === 'manager' && (

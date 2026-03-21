@@ -16,9 +16,13 @@ class BotManager:
         self.running = True
         print("🤖 Bot Manager started. Listening for events...")
         
-        # Start de backfill listener in de achtergrond
+        # 1. CRASH RECOVERY: Check of er bots aan stonden voor de VM uitviel
+        asyncio.create_task(self._startup_backfill())
+        
+        # 2. Luister naar handmatige start/stop kliks uit de UI
         asyncio.create_task(self._listen_for_bot_starts())
         
+        # 3. Luister naar nieuwe live kaarsen
         queue = event_bus.subscribe("CANDLE_CLOSED")
         
         while self.running:
@@ -32,8 +36,22 @@ class BotManager:
             except asyncio.CancelledError:
                 break
 
+    async def _startup_backfill(self):
+        """Wordt 1x uitgevoerd bij het opstarten van de backend om VM crashes op te vangen."""
+        def run():
+            db = SessionLocal()
+            try:
+                active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
+                for bot in active_bots:
+                    print(f"🔄 Recovered active bot '{bot.name}' after restart. Triggering historical backfill...")
+                    # Gebruik de thread-safe event loop om de backfill aan te roepen
+                    asyncio.run_coroutine_threadsafe(self._backfill_bot(bot.id), asyncio.get_running_loop())
+            finally:
+                db.close()
+        await asyncio.to_thread(run)
+
     async def _listen_for_bot_starts(self):
-        """Luistert of er een bot is gestart, en triggert een historische backfill."""
+        """Luistert of er een bot handmatig wordt gestart in de UI, en triggert een backfill."""
         queue = event_bus.subscribe("BOT_STATE_CHANGED")
         while self.running:
             try:
@@ -57,6 +75,7 @@ class BotManager:
                 symbol = bot.settings.get("symbol")
                 timeframe = bot.settings.get("timeframe")
 
+                # Haal alle historische kaarsen op
                 query = db.query(
                     Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume
                 ).filter(
@@ -66,10 +85,12 @@ class BotManager:
                 df = pd.read_sql(query, db.bind)
                 if df.empty: return
 
+                # Voer de bot wiskunde uit over de hele historie
                 evaluator = NodeEvaluator(bot.settings)
                 evaluator.df = df.copy()
-                evaluator._calculate_indicators() # Reken alle wiskunde uit voor de hele historie
+                evaluator._calculate_indicators() 
 
+                # Kijk welke timestamps we al hebben, zodat we geen dubbele data opslaan
                 existing_timestamps = {s[0] for s in db.query(Signal.timestamp).filter(Signal.bot_name == bot.name).all()}
                 new_signals = []
                 standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
@@ -105,6 +126,8 @@ class BotManager:
                     db.bulk_save_objects(new_signals)
                     db.commit()
                     print(f"✅ Backfill Complete: Generated {len(new_signals)} historical signals/ticks for '{bot.name}'")
+                else:
+                    print(f"⚡ Backfill Complete: No new historical data needed for '{bot.name}'")
 
             except Exception as e:
                 print(f"❌ Backfill Error: {e}")
