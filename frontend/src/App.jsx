@@ -1,13 +1,33 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import DataManager from './components/DataManager';
 import ChartEngine from './components/ChartEngine';
 import Settings from './components/Settings';
+import BotManagerUI from './components/BotManagerUI';
+import { apiClient } from './api/client';
 
 export default function App() {
   const [activeView, setActiveView] = useState('manager');
   const [openCharts, setOpenCharts] = useState([]);
+  const [runningBots, setRunningBots] = useState([]);
   const [error, setError] = useState(null);
+
+  // Fetch running bots for the sidebar
+  const fetchRunningBots = async () => {
+    try {
+      const res = await apiClient.get('/api/bots');
+      const active = res.data.filter(b => b.is_active);
+      setRunningBots(active);
+    } catch (err) {
+      console.error("Silent background fetch error:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchRunningBots();
+    const botInterval = setInterval(fetchRunningBots, 5000);
+    return () => clearInterval(botInterval);
+  }, []);
 
   const handleOpenChart = (dataset) => {
     const chartId = `${dataset.symbol}_${dataset.timeframe}`;
@@ -34,15 +54,18 @@ export default function App() {
         setActiveView={setActiveView} 
         openCharts={openCharts} 
         closeChart={closeChart} 
+        runningBots={runningBots}
+        openBotChart={(bot) => handleOpenChart({ symbol: bot.settings.symbol, timeframe: bot.settings.timeframe })}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         
-        {/* FIX: Header wordt alleen getoond bij Settings of Data Manager */}
-        {(activeView === 'manager' || activeView === 'settings') && (
+        {['manager', 'settings', 'bots'].includes(activeView) && (
           <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-6 shrink-0">
-            <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide">
-              {activeView === 'manager' ? 'Market Data Vault' : 'Exchange Configuration'}
+            <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
+              {activeView === 'manager' ? 'Market Data Vault' : 
+               activeView === 'bots' ? 'Algorithm Manager' : 
+               'Exchange Configuration'}
             </h2>
           </header>
         )}
@@ -54,22 +77,29 @@ export default function App() {
           </div>
         )}
 
-        <main className="flex-1 overflow-auto p-6 flex flex-col relative">
+        {/* Padding and scrolling applied globally to the main view container */}
+        <main className="flex-1 overflow-auto flex flex-col relative">
+          
           {activeView === 'manager' && (
-             <DataManager openChart={handleOpenChart} setError={setError} />
+             <div className="p-6 w-full fade-in"><DataManager openChart={handleOpenChart} setError={setError} /></div>
           )}
 
           {activeView === 'settings' && (
-             <Settings setError={setError} />
+             <div className="p-6 w-full fade-in"><Settings setError={setError} /></div>
+          )}
+
+          {activeView === 'bots' && (
+             <div className="p-6 w-full fade-in"><BotManagerUI setError={setError} /></div>
           )}
 
           {openCharts.map(chart => (
             activeView === chart.id && (
-              <div key={chart.id} className="flex-1 w-full border border-[#2b3139] rounded overflow-hidden shadow-2xl relative">
+              <div key={chart.id} className="flex-1 w-full h-full relative border-t-0 border border-[#2b3139]">
                  <ChartEngine dataset={chart} />
               </div>
             )
           ))}
+          
         </main>
       </div>
     </div>

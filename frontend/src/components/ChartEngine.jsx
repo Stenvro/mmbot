@@ -1,97 +1,178 @@
-import { useEffect, useState, useRef } from 'react';
-import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
+import { useEffect, useState, useRef, useMemo } from 'react';
+// FIX: We importeren nu specifiek CandlestickSeries, HistogramSeries en LineSeries voor v5!
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import { apiClient } from '../api/client';
 
-const getOkxWsTimeframe = (tf) => {
-  const map = { '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1H', '2h': '2H', '4h': '4H', '6h': '6H', '12h': '12H', '1d': '1D', '1w': '1W', '1M': '1M' };
-  return map[tf] || '1H'; 
+const safeParseTime = (ts) => {
+  if (!ts) return null;
+  if (typeof ts === 'number') return ts; 
+  let cleanTs = ts;
+  if (typeof cleanTs === 'string') {
+    if (cleanTs.includes(' ')) cleanTs = cleanTs.replace(' ', 'T');
+    if (!cleanTs.endsWith('Z') && !cleanTs.includes('+')) cleanTs += 'Z';
+  }
+  const parsed = Math.floor(new Date(cleanTs).getTime() / 1000);
+  return isNaN(parsed) ? null : parsed;
+};
+
+const chartColors = ['#fcd535', '#0ea5e9', '#d946ef', '#2ebd85', '#f6465d', '#8b5cf6'];
+const getColor = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    return chartColors[Math.abs(hash) % chartColors.length];
 };
 
 export default function ChartEngine({ dataset }) {
+  if (!dataset || !dataset.symbol) return null;
+
   const chartContainerRef = useRef();
-  
+  const chartRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
+  const indicatorSeriesRef = useRef({}); 
   const lastCandleRef = useRef(null); 
-  const isCrosshairActive = useRef(false); 
-  const wsRef = useRef(null);
-  const pingIntervalRef = useRef(null);
+  const isCrosshairActive = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
-  
   const [hoverData, setHoverData] = useState(null);
   const [marketInfo, setMarketInfo] = useState(null);
-  const [isLive, setIsLive] = useState(false);
+  const [isLiveStreamActive, setIsLiveStreamActive] = useState(false);
+
+  const [signals, setSignals] = useState([]);
+  const [showMenu, setShowMenu] = useState(false);
+  const [expandedMenuBot, setExpandedMenuBot] = useState(null); 
+  const [botConfigs, setBotConfigs] = useState({});
 
   const fetchMarketInfo = async () => {
     try {
       const response = await apiClient.get(`/api/data/market-info/${dataset.symbol.replace('/', '-')}`);
       setMarketInfo(response.data);
-    } catch (err) {
-      console.error("Failed to fetch market info", err);
-    }
+    } catch (err) { /* silent */ }
+  };
+
+  const initBotConfigs = async () => {
+    try {
+      const botRes = await apiClient.get('/api/bots/');
+      const validBots = botRes.data.filter(b => b.settings?.symbol === dataset.symbol && b.settings?.timeframe === dataset.timeframe);
+      
+      const newConfigs = {};
+      validBots.forEach(bot => {
+         newConfigs[bot.name] = { showMarkers: false, indicators: {} };
+         if (bot.settings && bot.settings.nodes) {
+             Object.values(bot.settings.nodes).forEach(node => {
+                 if (node.class === 'indicator') {
+                     const suffix = node.params?.length ? `_${node.params.length}` : '';
+                     const indName = `${node.method.toUpperCase()}${suffix}`;
+                     newConfigs[bot.name].indicators[indName] = false; 
+                 }
+             });
+         }
+      });
+      setBotConfigs(newConfigs);
+    } catch (e) { console.error("Error setting up configs", e); }
+  };
+
+  const pollSignals = async () => {
+    try {
+      const sigRes = await apiClient.get(`/api/bots/signals`, {
+        params: { symbol: dataset.symbol, timeframe: dataset.timeframe }
+      });
+      
+      const fetchedData = sigRes.data || [];
+      setSignals(fetchedData);
+    } catch (e) { console.error("Signal Fetch Error:", e); }
+  };
+
+  const applyInitialDataToChart = (rawData) => {
+    if (!rawData || rawData.length === 0) return;
+    const uniqueData = [];
+    const seenTimes = new Set();
+    
+    rawData.forEach(item => {
+        const safeTime = safeParseTime(item.time || item.timestamp);
+        if (safeTime && !seenTimes.has(safeTime)) {
+            seenTimes.add(safeTime);
+            uniqueData.push({ time: safeTime, open: item.open, high: item.high, low: item.low, close: item.close, value: item.volume || item.value });
+        }
+    });
+    
+    uniqueData.sort((a, b) => a.time - b.time);
+    
+    try {
+      candleSeriesRef.current.setData(uniqueData);
+      const volumeData = uniqueData.map(d => ({
+        time: d.time, value: d.value, color: d.close >= d.open ? '#2ebd8580' : '#f6465d80' 
+      }));
+      volumeSeriesRef.current.setData(volumeData);
+      
+      if (uniqueData.length > 0) {
+        lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
+      }
+    } catch (e) { console.error("Data Load Crash Prevented:", e); }
+  };
+
+  const updateLatestCandles = async () => {
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
+    try {
+      const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
+        headers: { 'x-timeframe': dataset.timeframe }, params: { limit: 10 }
+      });
+      if (response.data && response.data.length > 0) {
+        const rawLatest = response.data[response.data.length - 1];
+        const latestTime = safeParseTime(rawLatest.time || rawLatest.timestamp);
+        if (!latestTime) return;
+
+        const latestDbCandle = { ...rawLatest, time: latestTime };
+        
+        if (!lastCandleRef.current || latestDbCandle.time >= lastCandleRef.current.time) {
+            candleSeriesRef.current.update(latestDbCandle);
+            volumeSeriesRef.current.update({
+                time: latestDbCandle.time, 
+                value: latestDbCandle.volume || latestDbCandle.value,
+                color: latestDbCandle.close >= latestDbCandle.open ? '#2ebd8580' : '#f6465d80'
+            });
+            const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value };
+            if (!isCrosshairActive.current) setHoverData(newHoverState);
+            
+            const isFresh = (Date.now() / 1000) - latestDbCandle.time < 180;
+            setIsLiveStreamActive(isFresh);
+            lastCandleRef.current = newHoverState;
+        }
+      }
+    } catch (err) { /* silent */ }
   };
 
   useEffect(() => {
     fetchMarketInfo();
-    const interval = setInterval(fetchMarketInfo, 60000); 
-    return () => clearInterval(interval);
-  }, [dataset.symbol]);
+    initBotConfigs(); 
+    pollSignals();    
 
-  const applyInitialDataToChart = (rawData) => {
-    const uniqueData = [];
-    const seenTimes = new Set();
-    rawData.forEach(item => {
-        if (!seenTimes.has(item.time)) {
-            seenTimes.add(item.time);
-            uniqueData.push(item);
-        }
-    });
-    uniqueData.sort((a, b) => a.time - b.time);
-
-    candleSeriesRef.current.setData(uniqueData);
-
-    const volumeData = uniqueData.map(d => ({
-      time: d.time, 
-      value: d.value, 
-      color: d.close >= d.open ? '#2ebd8580' : '#f6465d80' 
-    }));
-    volumeSeriesRef.current.setData(volumeData);
-
-    if (uniqueData.length > 0) {
-      lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
-      if (!isCrosshairActive.current) setHoverData(lastCandleRef.current);
-    }
-  };
-
-  useEffect(() => {
-    let chart;
-    setIsLive(false); 
+    const infoInterval = setInterval(fetchMarketInfo, 60000); 
 
     const initChart = async () => {
       try {
         setLoading(true);
         setErrorMsg(null);
         
-        chart = createChart(chartContainerRef.current, {
+        const chart = createChart(chartContainerRef.current, {
           layout: { background: { type: 'solid', color: '#0b0e11' }, textColor: '#848e9c' },
           grid: { vertLines: { color: '#1f2329' }, horzLines: { color: '#1f2329' } },
-          crosshair: { mode: 0 },
+          crosshair: { mode: 0 }, 
           rightPriceScale: { borderColor: '#2b3139' },
-          timeScale: { borderColor: '#2b3139', timeVisible: true },
+          leftPriceScale: { visible: true, borderColor: '#2b3139' },
+          timeScale: { borderColor: '#2b3139', timeVisible: true }, 
           autoSize: true, 
         });
+        chartRef.current = chart;
 
+        // V5 API FIX: 'addSeries(CandlestickSeries, ...)' in plaats van 'addCandlestickSeries'
         candleSeriesRef.current = chart.addSeries(CandlestickSeries, {
-          upColor: '#2ebd85', downColor: '#f6465d', borderVisible: false,
-          wickUpColor: '#2ebd85', wickDownColor: '#f6465d'
+          upColor: '#2ebd85', downColor: '#f6465d', borderVisible: false, wickUpColor: '#2ebd85', wickDownColor: '#f6465d'
         });
-
-        volumeSeriesRef.current = chart.addSeries(HistogramSeries, {
-          priceFormat: { type: 'volume' },
-          priceScaleId: '', 
-        });
+        
+        // V5 API FIX: 'addSeries(HistogramSeries, ...)' in plaats van 'addHistogramSeries'
+        volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
         volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
         const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
@@ -99,9 +180,8 @@ export default function ChartEngine({ dataset }) {
         });
 
         if (!response.data || response.data.length === 0) {
-           setErrorMsg("No data found in database. Please download data first.");
-           setLoading(false);
-           return;
+           setErrorMsg("No data found in local database. Download historical data first.");
+           setLoading(false); return;
         }
 
         applyInitialDataToChart(response.data);
@@ -113,148 +193,162 @@ export default function ChartEngine({ dataset }) {
             if (lastCandleRef.current) setHoverData(lastCandleRef.current);
             return;
           }
-          
           isCrosshairActive.current = true;
           const dCandle = param.seriesData.get(candleSeriesRef.current);
           const dVol = param.seriesData.get(volumeSeriesRef.current);
-          
           if (dCandle) {
-            setHoverData({ ...dCandle, value: dVol ? dVol.value : 0 });
-          } else {
-            if (lastCandleRef.current) setHoverData(lastCandleRef.current);
+             setHoverData({ ...dCandle, value: dVol ? dVol.value : 0 });
           }
         });
-
       } catch (error) {
         setErrorMsg(`API Error: ${error.message}`);
-      } finally {
-        setLoading(false);
-      }
+      } finally { setLoading(false); }
     };
 
     initChart();
+    const pollInterval = setInterval(updateLatestCandles, 1000);
+    const signalInterval = setInterval(pollSignals, 3000); 
     
     return () => { 
-      if (wsRef.current) wsRef.current.close();
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      if (chart) chart.remove(); 
+      clearInterval(infoInterval);
+      clearInterval(pollInterval);
+      clearInterval(signalInterval);
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
     };
-  }, [dataset]);
+  }, [dataset.symbol, dataset.timeframe]);
 
-  // De Hybride Live Functie
-  const toggleLive = async () => {
-    if (isLive) {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+  useEffect(() => {
+    if (!chartRef.current || !candleSeriesRef.current || signals.length === 0) return;
+    
+    // --- 1. TEKEN MARKERS ---
+    const markersByTime = {};
+    signals.forEach(sig => {
+      if (botConfigs[sig.bot_name]?.showMarkers && (sig.action === 'buy' || sig.action === 'sell')) {
+        const markerTime = safeParseTime(sig.timestamp);
+        if (!markerTime) return; 
+        if (!markersByTime[markerTime]) markersByTime[markerTime] = [];
+        markersByTime[markerTime].push(sig);
       }
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-      setIsLive(false);
-      return;
+    });
+
+    const finalMarkers = [];
+    Object.keys(markersByTime).forEach(timeStr => {
+        const time = parseInt(timeStr);
+        const sigsAtTime = markersByTime[time];
+        const buySigs = sigsAtTime.filter(s => s.action === 'buy');
+        const sellSigs = sigsAtTime.filter(s => s.action === 'sell');
+        
+        if (buySigs.length > 0) finalMarkers.push({
+            time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp',
+            text: buySigs.length > 1 ? `BUY (${buySigs.length})` : `BUY (${buySigs[0].bot_name})`
+        });
+        if (sellSigs.length > 0) finalMarkers.push({
+            time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown',
+            text: sellSigs.length > 1 ? `SELL (${sellSigs.length})` : `SELL (${sellSigs[0].bot_name})`
+        });
+    });
+
+    finalMarkers.sort((a, b) => a.time - b.time);
+    
+    try { 
+      if (typeof candleSeriesRef.current.setMarkers === 'function') {
+        candleSeriesRef.current.setMarkers(finalMarkers); 
+      }
+    } catch (e) { 
+      console.error("[CRITICAL] Marker Render Crash:", e); 
     }
 
-    try {
-      setLoading(true);
-      setErrorMsg(null);
+    // --- 2. TEKEN INDICATOR LIJNEN ---
+    Object.keys(botConfigs).forEach(botName => {
+        const config = botConfigs[botName];
+        
+        Object.keys(config.indicators).forEach(indKey => {
+            const seriesId = `${botName}_${indKey}`;
+            const isActive = config.indicators[indKey];
 
-      // FIX: Bepaal exact hoe groot het gat is vanaf de laatste bekende kaars
-      const lastKnownTimeMs = lastCandleRef.current 
-        ? lastCandleRef.current.time * 1000 
-        : Date.now() - (86400000 * 7); // Als vangnet pakken we een week
+            if (isActive) {
+                if (!indicatorSeriesRef.current[seriesId]) {
+                    const isOscillator = /RSI|MACD|MFI|CCI|STOCH|ATR/i.test(indKey);
+                    // V5 API FIX: 'addSeries(LineSeries, ...)' in plaats van 'addLineSeries'
+                    indicatorSeriesRef.current[seriesId] = chartRef.current.addSeries(LineSeries, {
+                        color: getColor(seriesId),
+                        lineWidth: 2,
+                        priceScaleId: isOscillator ? 'left' : 'right', 
+                        title: `${botName} ${indKey}`,
+                        lastValueVisible: true,
+                        priceLineVisible: true,
+                    });
+                }
+                
+                const series = indicatorSeriesRef.current[seriesId];
+                const dataMap = new Map(); 
+                
+                signals.forEach(sig => {
+                    if (sig.bot_name === botName && sig.extra_data) {
+                        let parsedExtra = {};
+                        try {
+                            parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : sig.extra_data;
+                        } catch (e) {}
 
-      // 1. Laat de backend het gat exact dichten
-      const payload = {
-        timeframe: dataset.timeframe,
-        start_date: new Date(lastKnownTimeMs).toISOString(), 
-        end_date: new Date().toISOString()
-      };
-      await apiClient.post(`/api/data/fetch/${dataset.symbol.replace('/', '-')}`, payload);
+                        if (parsedExtra[indKey] !== undefined && parsedExtra[indKey] !== null) {
+                            const t = safeParseTime(sig.timestamp);
+                            const val = Number(parsedExtra[indKey]); 
+                            
+                            if (t && !isNaN(val)) {
+                                dataMap.set(t, val); 
+                            }
+                        }
+                    }
+                });
+                
+                const uniqueLineData = Array.from(dataMap.entries())
+                    .map(([t, v]) => ({ time: t, value: v }))
+                    .sort((a, b) => a.time - b.time);
 
-      // 2. Haal de kersverse data op en pas toe op de grafiek
-      const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
-        headers: { 'x-timeframe': dataset.timeframe }
+                try {
+                  if (uniqueLineData.length > 0) {
+                      series.setData(uniqueLineData);
+                      series.applyOptions({ visible: true });
+                  } else {
+                      series.applyOptions({ visible: false });
+                  }
+                } catch(e) {
+                   console.error(`[CRITICAL] Line Render Crash for ${seriesId}:`, e);
+                }
+
+            } else {
+                if (indicatorSeriesRef.current[seriesId]) {
+                    indicatorSeriesRef.current[seriesId].applyOptions({ visible: false });
+                }
+            }
+        });
+    });
+
+  }, [signals, botConfigs]);
+
+  const toggleMarkerConfig = (targetBotName) => {
+      setBotConfigs(prev => {
+          const newState = JSON.parse(JSON.stringify(prev));
+          newState[targetBotName].showMarkers = !newState[targetBotName].showMarkers;
+          return newState;
       });
-      applyInitialDataToChart(response.data);
-      setLoading(false);
-
-    } catch (e) {
-      console.warn("Gap-sync failed, falling back to live stream anyway", e);
-      setLoading(false);
-    }
-
-    // 3. Start de WebSocket voor het real-time dansen van de kaars
-    const ws = new WebSocket('wss://ws.okx.com:8443/ws/v5/business');
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setIsLive(true);
-      const channel = `candle${getOkxWsTimeframe(dataset.timeframe)}`;
-      const instId = dataset.symbol.replace('/', '-').toUpperCase();
-      
-      ws.send(JSON.stringify({
-        op: "subscribe",
-        args: [{ channel: channel, instId: instId }]
-      }));
-
-      // Hartslag zodat OKX niet ophangt
-      pingIntervalRef.current = setInterval(() => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send("ping");
-        }
-      }, 20000);
-    };
-
-    ws.onmessage = (event) => {
-      if (event.data === 'pong') return;
-
-      const response = JSON.parse(event.data);
-      
-      if (response.event === 'error') {
-        console.error("OKX WS Error:", response);
-        setErrorMsg(`OKX Live Error: ${response.msg}`);
-        setIsLive(false);
-        ws.close();
-        return;
-      }
-
-      if (response.data && response.data.length > 0 && candleSeriesRef.current && volumeSeriesRef.current) {
-        const candle = response.data[0];
-        const time = Math.floor(parseInt(candle[0]) / 1000);
-        const open = parseFloat(candle[1]);
-        const high = parseFloat(candle[2]);
-        const low = parseFloat(candle[3]);
-        const close = parseFloat(candle[4]);
-        const volume = parseFloat(candle[5]);
-
-        const tickData = { time, open, high, low, close };
-        const volData = { time, value: volume, color: close >= open ? '#2ebd8580' : '#f6465d80' };
-
-        try {
-          candleSeriesRef.current.update(tickData);
-          volumeSeriesRef.current.update(volData);
-          
-          const newLatest = { ...tickData, value: volume };
-          lastCandleRef.current = newLatest;
-          
-          if (!isCrosshairActive.current) {
-            setHoverData(newLatest);
-          }
-        } catch (err) {
-          // Negeer oude ticks rustig
-        }
-      }
-    };
-
-    ws.onerror = (error) => {
-      setIsLive(false);
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-    };
-
-    ws.onclose = () => {
-      setIsLive(false);
-      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
-    };
   };
+
+  const toggleIndicatorConfig = (targetBotName, indKey) => {
+      setBotConfigs(prev => {
+          const newState = JSON.parse(JSON.stringify(prev));
+          const targetState = !newState[targetBotName].indicators[indKey];
+          
+          for (const bName in newState) {
+              if (newState[bName].indicators[indKey] !== undefined) {
+                  newState[bName].indicators[indKey] = targetState;
+              }
+          }
+          return newState;
+      });
+  };
+
+  const toggleMenuBot = (botName) => setExpandedMenuBot(expandedMenuBot === botName ? null : botName);
 
   const formatNum = (num) => num !== undefined && num !== null ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A';
   const formatChange = (num) => {
@@ -273,11 +367,7 @@ export default function ChartEngine({ dataset }) {
               <span className="text-white font-bold tracking-wider">{dataset.symbol}</span>
               <span className="bg-[#2b3139] text-[#eaecef] text-[10px] px-1.5 py-0.5 rounded uppercase">{dataset.timeframe}</span>
             </div>
-            {marketInfo && (
-              <span className={`text-xs font-mono font-medium mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
-                {marketInfo.last}
-              </span>
-            )}
+            {marketInfo && <span className={`text-xs font-mono font-medium mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{marketInfo.last}</span>}
           </div>
 
           {marketInfo && (
@@ -304,15 +394,64 @@ export default function ChartEngine({ dataset }) {
           )}
         </div>
 
-        <div>
-          <button 
-            onClick={toggleLive}
-            disabled={loading || errorMsg}
-            className={`flex items-center space-x-2 px-4 py-1.5 rounded transition-colors text-sm font-medium ${isLive ? 'bg-[#f6465d]/10 text-[#f6465d] border border-[#f6465d]/30 hover:bg-[#f6465d]/20' : 'bg-[#2ebd85]/10 text-[#2ebd85] border border-[#2ebd85]/30 hover:bg-[#2ebd85]/20 disabled:opacity-50'}`}
-          >
-            <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-[#f6465d] animate-pulse' : 'bg-[#2ebd85]'}`}></div>
-            <span>{isLive ? 'Stop Live Feed' : 'Go Live'}</span>
+        <div className="flex items-center space-x-4 relative">
+          <div className={`flex items-center space-x-2 px-3 py-1.5 rounded text-xs font-medium border ${isLiveStreamActive ? 'bg-[#2ebd85]/10 text-[#2ebd85] border-[#2ebd85]/30' : 'bg-[#fcd535]/10 text-[#fcd535] border-[#fcd535]/30'}`}>
+            <div className={`w-2 h-2 rounded-full ${isLiveStreamActive ? 'bg-[#2ebd85] animate-pulse' : 'bg-[#fcd535]'}`}></div>
+            <span className="hidden sm:inline">{isLiveStreamActive ? 'SYNCED: LIVE' : 'SYNCED: STATIC'}</span>
+          </div>
+
+          <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 rounded bg-[#2b3139] hover:bg-[#3b4149] transition-colors border border-[#3b4149] flex items-center justify-center">
+            <svg className="w-5 h-5 text-[#eaecef]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
+
+          {showMenu && (
+            <div className="absolute top-12 right-0 w-80 bg-[#181a20] border border-[#2b3139] rounded shadow-xl py-2 z-50">
+              <div className="px-4 py-3 text-xs font-bold text-[#848e9c] uppercase border-b border-[#2b3139] mb-1">Algorithm Overlay</div>
+              {Object.keys(botConfigs).length === 0 ? (
+                <div className="px-4 py-3 text-xs text-[#848e9c]">No algorithms active on this chart.</div>
+              ) : (
+                Object.keys(botConfigs).map(botName => {
+                  const config = botConfigs[botName];
+                  const isExpanded = expandedMenuBot === botName;
+
+                  return (
+                    <div key={botName} className="border-b border-[#2b3139]/50 last:border-0 transition-colors">
+                      <button 
+                        onClick={() => toggleMenuBot(botName)}
+                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2b3139]/30 transition-colors"
+                      >
+                        <div className="text-sm font-bold text-[#eaecef] flex items-center">
+                           <span className={`w-1.5 h-1.5 rounded-full mr-2 ${config.showMarkers ? 'bg-[#2ebd85]' : 'bg-[#848e9c]'}`}></span>
+                           {botName}
+                        </div>
+                        <svg className={`w-4 h-4 text-[#848e9c] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="flex flex-col space-y-3 pl-8 pr-4 pb-4 bg-[#0b0e11]/50 border-l-2 border-[#2b3139] ml-4 mt-1">
+                            <label className="flex items-center cursor-pointer mt-2">
+                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
+                                checked={config.showMarkers} onChange={() => toggleMarkerConfig(botName)} />
+                                <span className="ml-2 text-xs text-[#eaecef]">Action Signals (Buy/Sell)</span>
+                            </label>
+                            
+                            {Object.keys(config.indicators).map(indKey => (
+                                <label key={indKey} className="flex items-center cursor-pointer">
+                                    <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]"
+                                    checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} />
+                                    <span className="ml-2 text-xs text-[#eaecef]">Draw Line: {indKey}</span>
+                                </label>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -334,7 +473,6 @@ export default function ChartEngine({ dataset }) {
 
         <div ref={chartContainerRef} className="absolute inset-0 z-0" />
       </div>
-
     </div>
   );
 }

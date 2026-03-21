@@ -1,0 +1,199 @@
+import asyncio
+import json
+import websockets
+import ccxt
+from datetime import datetime, timezone
+from sqlalchemy.orm import Session
+from backend.core.database import SessionLocal
+from backend.models.bots import BotConfig
+from backend.models.candles import Candle
+from backend.core.events import event_bus
+
+OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/business"
+
+class OKXStreamer:
+    def __init__(self):
+        self.running = False
+        self.ws = None
+        self.exchange = ccxt.okx()
+        self.needs_reconnect = False 
+
+    def _get_active_subscriptions(self) -> set:
+        db: Session = SessionLocal()
+        unique_subs = set()
+        try:
+            active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
+            for bot in active_bots:
+                settings = bot.settings or {}
+                symbol = settings.get("symbol")
+                timeframe = settings.get("timeframe")
+                
+                if symbol and timeframe:
+                    okx_inst_id = symbol.replace("/", "-").upper()
+                    tf = timeframe.lower()
+                    if tf == "1h": tf = "1H" 
+                    elif tf == "4h": tf = "4H"
+                    unique_subs.add((f"candle{tf}", okx_inst_id))
+            return unique_subs
+        finally:
+            db.close()
+
+    def _sync_historical_gaps(self, subscriptions):
+        db: Session = SessionLocal()
+        DEFAULT_LOOKBACK_CANDLES = 500
+
+        try:
+            for channel, inst_id in subscriptions:
+                symbol = inst_id.replace("-", "/")
+                timeframe = channel.replace("candle", "").lower()
+                tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
+                
+                last_candle = db.query(Candle).filter(
+                    Candle.symbol == symbol, Candle.timeframe == timeframe
+                ).order_by(Candle.timestamp.desc()).first()
+                
+                if last_candle:
+                    since = int(last_candle.timestamp.timestamp() * 1000)
+                    print(f"🔄 Resuming {symbol} ({timeframe})...")
+                else:
+                    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                    since = now_ms - (DEFAULT_LOOKBACK_CANDLES * tf_ms)
+                    print(f"📥 Baseline sync {symbol} ({timeframe})...")
+                    
+                while True:
+                    ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=100)
+                    if not ohlcv or len(ohlcv) <= 1:
+                        break
+                    
+                    start_dt = datetime.fromtimestamp(ohlcv[0][0] / 1000.0, tz=timezone.utc)
+                    end_dt = datetime.fromtimestamp(ohlcv[-1][0] / 1000.0, tz=timezone.utc)
+                    
+                    existing_candles = db.query(Candle.timestamp).filter(
+                        Candle.symbol == symbol, Candle.timeframe == timeframe,
+                        Candle.timestamp >= start_dt, Candle.timestamp <= end_dt
+                    ).all()
+                    
+                    # FIX: SQLite drops timezone info sometimes. Force UTC comparison.
+                    existing_times = set()
+                    for c in existing_candles:
+                        ts = c[0]
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        existing_times.add(ts)
+                    
+                    new_candles = []
+                    for data in ohlcv:
+                        dt = datetime.fromtimestamp(data[0] / 1000.0, tz=timezone.utc)
+                        if dt not in existing_times:
+                            new_candles.append(Candle(
+                                symbol=symbol, timeframe=timeframe, timestamp=dt,
+                                open=float(data[1]), high=float(data[2]), low=float(data[3]),
+                                close=float(data[4]), volume=float(data[5])
+                            ))
+                    
+                    if new_candles:
+                        db.bulk_save_objects(new_candles)
+                        db.commit()
+                    
+                    since = ohlcv[-1][0] + 1
+                    
+                print(f"✅ Sync complete for {symbol} ({timeframe}).")
+        except Exception as e:
+            print(f"❌ Sync Error: {e}")
+        finally:
+            db.close()
+
+    async def _listen_to_bot_changes(self):
+        queue = event_bus.subscribe("BOT_STATE_CHANGED")
+        while self.running:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                print(f"🔄 Bot state changed (ID: {event['bot_id']} -> {event['action']}). Reloading streams...")
+                self.needs_reconnect = True
+                if self.ws: await self.ws.close()
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+
+    async def start(self):
+        self.running = True
+        print("🌐 OKX WebSocket Streamer starting...")
+        asyncio.create_task(self._listen_to_bot_changes())
+        
+        while self.running:
+            try:
+                self.needs_reconnect = False
+                subs_set = self._get_active_subscriptions()
+                
+                if not subs_set:
+                    await asyncio.sleep(2)
+                    continue
+                
+                self._sync_historical_gaps(subs_set)
+                args = [{"channel": c, "instId": i} for c, i in subs_set]
+
+                async with websockets.connect(OKX_WS_URL) as ws:
+                    self.ws = ws
+                    await ws.send(json.dumps({"op": "subscribe", "args": args}))
+                    print(f"📡 WebSocket Live for {len(args)} streams.")
+
+                    while self.running and not self.needs_reconnect:
+                        message = await ws.recv()
+                        await self._process_message(message)
+                        
+            except websockets.exceptions.ConnectionClosed:
+                if self.running and not self.needs_reconnect:
+                    print("⚠️ OKX Connection closed. Reconnecting...")
+                    await asyncio.sleep(2)
+            except Exception as e:
+                if self.running:
+                    print(f"❌ Streamer Error: {e}")
+                    await asyncio.sleep(5)
+
+    async def _process_message(self, message: str):
+        data = json.loads(message)
+        if "arg" in data and "data" in data:
+            channel = data["arg"]["channel"]
+            inst_id = data["arg"]["instId"]
+            symbol = inst_id.replace("-", "/")
+            timeframe = channel.replace("candle", "").lower()
+            
+            for candle_data in data["data"]:
+                ts_ms = int(candle_data[0])
+                dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+                is_closed = (candle_data[8] == "1")
+                await self._save_candle_to_db(symbol, timeframe, dt, candle_data, is_closed)
+
+    async def _save_candle_to_db(self, symbol, timeframe, timestamp, data, is_closed):
+        def db_op():
+            db = SessionLocal()
+            try:
+                candle = db.query(Candle).filter(
+                    Candle.symbol == symbol, Candle.timeframe == timeframe, Candle.timestamp == timestamp
+                ).first()
+
+                if not candle:
+                    candle = Candle(symbol=symbol, timeframe=timeframe, timestamp=timestamp)
+                    db.add(candle)
+
+                candle.open = float(data[1])
+                candle.high = float(data[2])
+                candle.low = float(data[3])
+                candle.close = float(data[4])
+                candle.volume = float(data[5])
+                db.commit()
+            finally:
+                db.close()
+                
+        await asyncio.to_thread(db_op)
+        
+        if is_closed:
+            await event_bus.publish("CANDLE_CLOSED", {"symbol": symbol, "timeframe": timeframe, "timestamp": timestamp})
+
+    def stop(self):
+        self.running = False
+        if self.ws: asyncio.create_task(self.ws.close())
+        print("🌐 OKX Streamer stopped.")
+
+okx_streamer = OKXStreamer()
