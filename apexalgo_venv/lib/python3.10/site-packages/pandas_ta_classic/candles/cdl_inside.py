@@ -1,0 +1,93 @@
+# -*- coding: utf-8 -*-
+# Candle Inside (CDL_INSIDE)
+from typing import Any, Optional
+from pandas import Series
+from pandas_ta_classic.utils import candle_color, get_offset
+from pandas_ta_classic.utils import verify_series
+
+
+def cdl_inside(
+    open_: Series,
+    high: Series,
+    low: Series,
+    close: Series,
+    asbool: bool = False,
+    offset: Optional[int] = None,
+    **kwargs: Any,
+) -> Optional[Series]:
+    """Indicator: Candle Type - Inside Bar"""
+    # Validate arguments
+    open_ = verify_series(open_)
+    high = verify_series(high)
+    low = verify_series(low)
+    close = verify_series(close)
+    offset = get_offset(offset)
+
+    if open_ is None or high is None or low is None or close is None:
+        return None
+
+    # Calculate Result
+    inside = (high.diff() < 0) & (low.diff() > 0)
+
+    if not asbool:
+        inside *= candle_color(open_, close)
+
+    # Offset
+    if offset != 0:
+        inside = inside.shift(offset)
+
+    # Handle fills
+    if "fillna" in kwargs:
+        inside.fillna(kwargs["fillna"], inplace=True)
+    if "fill_method" in kwargs:
+        if "fill_method" in kwargs:
+
+            if kwargs["fill_method"] == "ffill":
+
+                inside.ffill(inplace=True)
+
+            elif kwargs["fill_method"] == "bfill":
+
+                inside.bfill(inplace=True)
+
+    # Name and Categorize it
+    inside.name = f"CDL_INSIDE"
+    inside.category = "candles"
+
+    return inside
+
+
+cdl_inside.__doc__ = """Candle Type: Inside Bar
+
+An Inside Bar is a bar that is engulfed by the prior highs and lows of it's
+previous bar. In other words, the current bar is smaller than it's previous bar.
+Set asbool=True if you want to know if it is an Inside Bar. Note by default
+asbool=False so this returns a 0 if it is not an Inside Bar, 1 if it is an
+Inside Bar and close > open, and -1 if it is an Inside Bar but close < open.
+
+Sources:
+    https://www.tradingview.com/script/IyIGN1WO-Inside-Bar/
+
+Calculation:
+    Default Inputs:
+        asbool=False
+    inside = (high.diff() < 0) & (low.diff() > 0)
+
+    if not asbool:
+        inside *= candle_color(open_, close)
+
+Args:
+    open_ (pd.Series): Series of 'open's
+    high (pd.Series): Series of 'high's
+    low (pd.Series): Series of 'low's
+    close (pd.Series): Series of 'close's
+    asbool (bool): Returns the boolean result. Default: False
+    offset (int): How many periods to offset the result. Default: 0
+
+Kwargs:
+    fillna (value, optional): pd.DataFrame.fillna(value)
+    fill_method (value, optional): Type of fill method
+
+Returns:
+    pd.Series: New feature
+"""

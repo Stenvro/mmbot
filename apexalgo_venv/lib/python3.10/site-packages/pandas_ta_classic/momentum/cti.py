@@ -1,0 +1,64 @@
+# -*- coding: utf-8 -*-
+# Correlation Trend Indicator (CTI)
+from typing import Any, Optional
+from pandas import Series
+from pandas_ta_classic.overlap.linreg import linreg
+from pandas_ta_classic.utils import get_offset, verify_series
+
+
+def cti(
+    close: Series,
+    length: Optional[int] = None,
+    offset: Optional[int] = None,
+    **kwargs: Any,
+) -> Optional[Series]:
+    """Indicator: Correlation Trend Indicator"""
+    length = int(length) if length and length > 0 else 12
+    close = verify_series(close, length)
+    offset = get_offset(offset)
+
+    if close is None:
+        return None
+
+    cti = linreg(close, length=length, r=True)
+    if cti is None:
+        return None
+
+    # Offset
+    if offset != 0:
+        cti = cti.shift(offset)
+
+    # Handle fills
+    if "fillna" in kwargs:
+        cti.fillna(kwargs["fillna"], inplace=True)
+    if "fill_method" in kwargs:
+        if "fill_method" in kwargs:
+
+            if kwargs["fill_method"] == "ffill":
+
+                cti.ffill(inplace=True)
+
+            elif kwargs["fill_method"] == "bfill":
+
+                cti.bfill(inplace=True)
+
+    cti.name = f"CTI_{length}"
+    cti.category = "momentum"
+    return cti
+
+
+cti.__doc__ = """Correlation Trend Indicator (CTI)
+
+The Correlation Trend Indicator is an oscillator created by John Ehler in 2020.
+It assigns a value depending on how close prices in that range are to following
+a positively- or negatively-sloping straight line. Values range from -1 to 1.
+This is a wrapper for ta.linreg(close, r=True).
+
+Args:
+    close (pd.Series): Series of 'close's
+    length (int): It's period. Default: 12
+    offset (int): How many periods to offset the result. Default: 0
+
+Returns:
+    pd.Series: Series of the CTI values for the given period.
+"""

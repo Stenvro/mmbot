@@ -111,6 +111,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
           defaultData.orderType = 'market';
           defaultData.amountType = 'percentage';
           defaultData.amountValue = 100;
+          defaultData.slippage = 0.05;
+          defaultData.fee = 0.1;
       }
 
       const newNode = { id: getId(), type, position, data: defaultData };
@@ -175,6 +177,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                  order_type: entryNode.data.orderType,
                  amount_type: entryNode.data.amountType,
                  amount_value: entryNode.data.amountValue,
+                 fee: entryNode.data.fee || 0.1,
+                 slippage: entryNode.data.slippage || 0.05,
                  take_profits: tpEdges.map(e => {
                      const n = nodes.find(nd => nd.id === e.source);
                      return { type: n.data.triggerType, value: n.data.triggerValue, close_amount_type: n.data.closeType, close_amount_value: n.data.closeValue };
@@ -191,6 +195,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 order_type: exitNode.data.orderType,
                 amount_type: exitNode.data.amountType,
                 amount_value: exitNode.data.amountValue,
+                fee: exitNode.data.fee || 0.1,
+                slippage: exitNode.data.slippage || 0.05
             };
         }
 
@@ -206,7 +212,15 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 return sourceNode.id;
             }
             if (sourceNode.type === 'condition') {
-                payload.settings.nodes[sourceNode.id] = { class: "condition", left: traverse(sourceNode.id), operator: sourceNode.data.operator || ">", right: sourceNode.data.rightValue !== undefined && sourceNode.data.rightValue !== "" ? sourceNode.data.rightValue : null };
+                const leftEdge = edges.find(e => e.target === sourceNode.id && (e.targetHandle === 'left' || !e.targetHandle));
+                const rightEdge = edges.find(e => e.target === sourceNode.id && e.targetHandle === 'right');
+                
+                payload.settings.nodes[sourceNode.id] = { 
+                    class: "condition", 
+                    left: leftEdge ? traverseByEdge(leftEdge) : null, 
+                    operator: sourceNode.data.operator || ">", 
+                    right: rightEdge ? traverseByEdge(rightEdge) : (sourceNode.data.rightValue !== undefined && sourceNode.data.rightValue !== "" ? sourceNode.data.rightValue : null) 
+                };
                 return sourceNode.id;
             }
             if (sourceNode.type === 'logic') {
@@ -226,7 +240,17 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
              const sourceNode = nodes.find(n => n.id === edge.source);
              if(!sourceNode) return null;
              if (sourceNode.type === 'indicator') { payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: [sourceNode.data.period || 14] }; return sourceNode.id; }
-             if (sourceNode.type === 'condition') { payload.settings.nodes[sourceNode.id] = { class: "condition", left: traverse(sourceNode.id), operator: sourceNode.data.operator || ">", right: sourceNode.data.rightValue }; return sourceNode.id; }
+             if (sourceNode.type === 'condition') { 
+                 const leftEdge = edges.find(e => e.target === sourceNode.id && (e.targetHandle === 'left' || !e.targetHandle));
+                 const rightEdge = edges.find(e => e.target === sourceNode.id && e.targetHandle === 'right');
+                 payload.settings.nodes[sourceNode.id] = { 
+                     class: "condition", 
+                     left: leftEdge ? traverseByEdge(leftEdge) : null, 
+                     operator: sourceNode.data.operator || ">", 
+                     right: rightEdge ? traverseByEdge(rightEdge) : (sourceNode.data.rightValue !== undefined && sourceNode.data.rightValue !== "" ? sourceNode.data.rightValue : null) 
+                 }; 
+                 return sourceNode.id; 
+             }
              return null;
         };
 

@@ -47,9 +47,9 @@ export const BotConfigNode = ({ id, data }) => (
       </div>
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Live Execution Mode</label>
-        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode || "forward_test"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
-          <option value="forward_test">Forward Testing (Local DB Only)</option>
-          <option value="exchange">Exchange Execution (Requires API Key)</option>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode || "paper"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
+          <option value="paper">Paper Trading (Simulated Execution)</option>
+          <option value="exchange">Live Exchange (Requires API Key)</option>
         </select>
       </div>
     </div>
@@ -66,8 +66,8 @@ export const WhitelistNode = ({ id, data }) => (
       <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Tradeable Pairs (Comma Separated)</label>
       <textarea 
         className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#d946ef] outline-none min-h-[60px] resize-none font-mono"
-        placeholder="BTC/USDC, ETH/USDC, SOL/USDC"
-        value={data.pairs || "BTC/USDC"}
+        placeholder="BTC/USDT, ETH/USDT, SOL/USDT"
+        value={data.pairs || "BTC/USDT"}
         onChange={(e) => data.onChange(id, 'pairs', e.target.value)}
       />
     </div>
@@ -102,7 +102,7 @@ export const ApiKeyNode = ({ id, data }) => (
     <div className="p-4 bg-[#0b0e11]/80 rounded-b">
       <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Select API Credentials</label>
       <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={data.apiKeyName || ""} onChange={(e) => data.onChange(id, 'apiKeyName', e.target.value)}>
-        <option value="" disabled>No key selected (Forward Testing)</option>
+        <option value="" disabled>No key selected (Local Engine)</option>
         {data.availableKeys?.map(k => (
           <option key={k.name} value={k.name}>{k.name} ({k.is_sandbox ? 'Sandbox' : 'Live'})</option>
         ))}
@@ -127,7 +127,9 @@ export const IndicatorNode = ({ id, data }) => (
           <option value="rsi">RSI (Relative Strength)</option>
           <option value="macd">MACD</option>
           <option value="stoch">Stochastic</option>
-          <option value="cci">CCI</option>
+          <option value="cci">CCI (Commodity Channel)</option>
+          <option value="mfi">MFI (Money Flow Index)</option>
+          <option value="roc">ROC (Rate of Change)</option>
         </optgroup>
         <optgroup label="Moving Averages">
           <option value="sma">SMA (Simple)</option>
@@ -135,7 +137,7 @@ export const IndicatorNode = ({ id, data }) => (
         </optgroup>
         <optgroup label="Volatility">
           <option value="bbands">Bollinger Bands</option>
-          <option value="atr">ATR</option>
+          <option value="atr">ATR (Average True Range)</option>
         </optgroup>
       </select>
       <div className="flex items-center space-x-2 border-t border-[#2b3139] pt-3">
@@ -147,31 +149,46 @@ export const IndicatorNode = ({ id, data }) => (
   </div>
 );
 
+// HIER IS DE NIEUWE CONDITION NODE (Logisch en overzichtelijk)
 export const ConditionNode = ({ id, data }) => (
-  <div className="bg-[#181a20] border border-[#3b4149] rounded shadow-lg min-w-[280px] relative">
-    <Handle type="target" position={Position.Left} id="left" style={{ top: '50%' }} className="w-3 h-3 bg-[#848e9c] border-2 border-[#181a20]" />
+  <div className="bg-[#181a20] border border-[#3b4149] rounded shadow-lg min-w-[260px] relative">
+    {/* Twee strakke Handles aan de linkerkant */}
+    <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-3 h-3 bg-[#0ea5e9] border-2 border-[#181a20]" />
+    <Handle type="target" position={Position.Left} id="right" style={{ top: '80%' }} className="w-3 h-3 bg-[#d946ef] border-2 border-[#181a20]" />
+    
     <div className="bg-[#3b4149]/30 px-3 py-2 border-b border-[#3b4149]/50 flex justify-between items-center">
       <span className="font-bold text-[#eaecef] text-[11px] uppercase tracking-wider">DATA CONDITION</span>
       {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
     </div>
-    <div className="p-4 bg-[#0b0e11]/80 rounded-b flex flex-col space-y-3">
-      <div className="text-[10px] text-[#848e9c] font-bold uppercase flex justify-between px-1">
-        <span>Target (A)</span>
-        <span>Operator</span>
-        <span>Value (B)</span>
+    
+    <div className="p-4 bg-[#0b0e11]/80 rounded-b flex flex-col space-y-4">
+      {/* ROW 1: INPUT A */}
+      <div className="flex items-center">
+         <span className="text-[10px] text-[#0ea5e9] font-bold uppercase ml-1">Input A (Signal)</span>
       </div>
-      <div className="flex space-x-2 items-center">
-        <div className="w-8 h-8 rounded bg-[#181a20] flex items-center justify-center text-xs font-bold text-[#848e9c] border border-[#2b3139]">IN</div>
-        <select className="bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag font-bold focus:border-[#fcd535] outline-none flex-1 text-center" value={data.operator || ">"} onChange={(e) => data.onChange(id, 'operator', e.target.value)}>
-          <option value=">">&gt;</option>
-          <option value="<">&lt;</option>
-          <option value="==">==</option>
-          <option value=">=">&gt;=</option>
-          <option value="<=">&lt;=</option>
+
+      {/* ROW 2: OPERATOR */}
+      <div className="flex justify-center border-y border-[#2b3139] py-2">
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag font-bold focus:border-[#fcd535] outline-none text-center" value={data.operator || ">"} onChange={(e) => data.onChange(id, 'operator', e.target.value)}>
+          <option value=">">IS GREATER THAN (&gt;)</option>
+          <option value="<">IS LESS THAN (&lt;)</option>
+          <option value="==">IS EQUAL TO (==)</option>
+          <option value=">=">GREATER OR EQUAL (&gt;=)</option>
+          <option value="<=">LESS OR EQUAL (&lt;=)</option>
         </select>
-        <input type="number" placeholder="0.00" className="w-20 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-mono focus:border-[#fcd535] outline-none text-center" value={data.rightValue !== undefined ? data.rightValue : ""} onChange={(e) => data.onChange(id, 'rightValue', parseFloat(e.target.value))} />
+      </div>
+
+      {/* ROW 3: INPUT B / STATIC */}
+      <div className="flex items-center justify-between">
+         <span className="text-[10px] text-[#d946ef] font-bold uppercase ml-1">Input B</span>
+         <div className="flex items-center space-x-2">
+           <span className="text-[9px] text-[#848e9c] font-bold">OR</span>
+           <input type="number" placeholder="Static Value" title="Connect a line to Input B or type a static number here." className="w-20 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-1.5 nodrag font-mono focus:border-[#fcd535] outline-none text-center" value={data.rightValue !== undefined ? data.rightValue : ""} onChange={(e) => data.onChange(id, 'rightValue', parseFloat(e.target.value))} />
+         </div>
       </div>
     </div>
+    
+    {/* Eén Output Handle aan de rechterkant */}
     <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#fcd535] border-2 border-[#181a20]" />
   </div>
 );
@@ -220,12 +237,13 @@ export const StopLossNode = ({ id, data }) => (
       <div>
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Trigger Level (Loss)</label>
         <div className="flex space-x-2">
-            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#f6465d] outline-none" value={data.triggerType || "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
+            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] font-bold rounded p-2 nodrag focus:border-[#f6465d] outline-none" value={data.triggerType || "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
                 <option value="percentage">Percentage (%)</option>
                 <option value="trailing">Trailing (%)</option>
+                <option value="atr">ATR Trailing (x)</option>
                 <option value="fixed">Fixed Price</option>
             </select>
-            <input type="number" placeholder="e.g. 5" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#f6465d] text-xs rounded p-2 nodrag font-mono focus:border-[#f6465d] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', parseFloat(e.target.value))} />
+            <input type="number" placeholder={data.triggerType === 'atr' ? "Multiplier (e.g. 2.5)" : "Value"} className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#f6465d] text-xs rounded p-2 nodrag font-mono focus:border-[#f6465d] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', parseFloat(e.target.value))} />
         </div>
       </div>
       <div className="pt-3 border-t border-[#2b3139]">
@@ -279,7 +297,7 @@ export const TakeProfitNode = ({ id, data }) => (
 );
 
 // ==========================================
-// 4. ACTION NODE (Netjes Uitgelijnde Handles)
+// 4. ACTION NODE
 // ==========================================
 
 export const ActionNode = ({ id, data }) => {
@@ -296,7 +314,6 @@ export const ActionNode = ({ id, data }) => {
       
       <div className="p-4 bg-[#0b0e11]/80 rounded-b space-y-4">
          
-         {/* LOGIC ROW */}
          <div className="relative border border-[#2b3139] rounded p-3">
              <Handle type="target" position={Position.Left} id="logic" className="w-3 h-3 bg-[#848e9c] border-2 border-[#181a20] -left-[18px]" style={{ top: '50%' }} />
              <span className="absolute -left-10 top-1/2 -translate-y-1/2 text-[9px] font-bold text-[#848e9c] -rotate-90">LOGIC</span>
@@ -304,7 +321,7 @@ export const ActionNode = ({ id, data }) => {
              <div className="flex space-x-2">
                 <div className="w-1/2">
                     <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Direction</label>
-                    <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-bold outline-none" value={data.actionType || "buy"} onChange={(e) => data.onChange(id, 'actionType', e.target.value)}>
+                    <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-bold outline-none" style={{ color: color }} value={data.actionType || "buy"} onChange={(e) => data.onChange(id, 'actionType', e.target.value)}>
                         <option value="buy">BUY (Open)</option>
                         <option value="sell">SELL (Close)</option>
                     </select>
@@ -319,7 +336,17 @@ export const ActionNode = ({ id, data }) => {
              </div>
          </div>
 
-         {/* SIZING ROW */}
+         <div className="grid grid-cols-2 gap-2">
+            <div>
+                <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Slippage (%)</label>
+                <input type="number" step="0.01" className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none" value={data.slippage || 0.05} onChange={(e) => data.onChange(id, 'slippage', e.target.value)} />
+            </div>
+            <div>
+                <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Trading Fee (%)</label>
+                <input type="number" step="0.01" className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none" value={data.fee || 0.1} onChange={(e) => data.onChange(id, 'fee', e.target.value)} />
+            </div>
+         </div>
+
          <div className="border border-[#2b3139] rounded p-3">
              <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">{isBuy ? 'Entry Size' : 'Amount to Close'}</label>
              <div className="flex space-x-2">
@@ -331,7 +358,6 @@ export const ActionNode = ({ id, data }) => {
              </div>
          </div>
 
-         {/* RISK ROUTING ROW (Only for BUY) */}
          {isBuy && (
              <div className="relative border border-[#2b3139] rounded p-3 pt-4 pb-4">
                  <Handle type="target" position={Position.Left} id="tp" className="w-3 h-3 bg-[#2ebd85] border-2 border-[#181a20] -left-[18px]" style={{ top: '30%' }} />

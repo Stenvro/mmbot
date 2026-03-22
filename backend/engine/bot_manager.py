@@ -70,7 +70,7 @@ class BotManager:
             trade_amount = investment / current_price
             return max(trade_amount, 0.0001)
 
-    def _check_exits(self, open_position, current_price, is_sell_signal, bot_settings):
+    def _check_exits(self, open_position, current_price, is_sell_signal, bot_settings, df=None):
         trade_settings = bot_settings.get("trade_settings", {})
         entry_settings = trade_settings.get("entry", {})
         
@@ -88,7 +88,20 @@ class BotManager:
             sl_id = f"sl_{i}"
             if sl_id in state['triggered_exits']: continue
 
-            trigger_price = open_position.entry_price * (1 - (float(sl['value'])/100)) if sl['type'] == 'percentage' else float(sl['value'])
+            trigger_price = 0
+            if sl['type'] == 'percentage':
+                trigger_price = open_position.entry_price * (1 - (float(sl['value'])/100))
+            elif sl['type'] == 'trailing':
+                trigger_price = state['highest_price'] * (1 - (float(sl['value'])/100))
+            elif sl['type'] == 'atr' and df is not None:
+                import pandas_ta_classic as ta
+                multiplier = float(sl['value'])
+                # Bereken snelle 14-period ATR
+                atr_series = ta.atr(df['high'], df['low'], df['close'], length=14)
+                current_atr = atr_series.iloc[-1] if atr_series is not None and not atr_series.empty else 0
+                trigger_price = state['highest_price'] - (multiplier * current_atr)
+            else:
+                trigger_price = float(sl['value'])
             
             if current_price <= trigger_price:
                 close_triggered = True
