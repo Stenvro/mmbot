@@ -14,7 +14,6 @@ export default function App() {
   const [runningBots, setRunningBots] = useState([]);
   const [error, setError] = useState(null);
   
-  // State voor de Visual Builder Overlay
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingBot, setEditingBot] = useState(null);
 
@@ -32,9 +31,7 @@ export default function App() {
     fetchRunningBots();
     const botInterval = setInterval(fetchRunningBots, 5000);
     
-    // Luister naar de knop in BotManagerUI om de builder te openen
     const handleOpenBuilder = (e) => {
-        // e.detail bevat de bot data als we op 'Edit Bot' klikken, anders is het null (Create New)
         setEditingBot(e.detail || null); 
         setShowBuilder(true);
     };
@@ -49,11 +46,43 @@ export default function App() {
 
   const handleOpenChart = (dataset) => {
     const chartId = `${dataset.symbol}_${dataset.timeframe}`;
-    
     if (!openCharts.find(c => c.id === chartId)) {
       setOpenCharts(prev => [...prev, { ...dataset, id: chartId }]);
     }
     setActiveView(chartId);
+  };
+
+  // HIER IS DE NIEUWE MULTI-CHART LOGICA
+  const openBotChart = (bot) => {
+    // 1. Haal de lijst op (en val terug op de oude enkele 'symbol' als het een oude bot is)
+    const symbolsToOpen = (bot.settings?.symbols && bot.settings.symbols.length > 0) 
+      ? bot.settings.symbols 
+      : (bot.settings?.symbol ? [bot.settings.symbol] : []);
+
+    const timeframe = bot.settings?.timeframe || "15m";
+
+    // 2. We maken een kopie van je huidige open grafieken
+    let updatedCharts = [...openCharts];
+    let lastOpenedChartId = "";
+
+    // 3. Loop door alle munten uit je whitelist heen
+    symbolsToOpen.forEach(sym => {
+      const chartId = `${sym}_${timeframe}`;
+      lastOpenedChartId = chartId; // We onthouden de laatste zodat we daarop kunnen focussen
+      
+      // Voeg hem alleen toe als hij nog niet open staat
+      if (!updatedCharts.find(c => c.id === chartId)) {
+        updatedCharts.push({ id: chartId, symbol: sym, timeframe: timeframe });
+      }
+    });
+
+    // 4. Update de state in React zodat alle tabbladen verschijnen
+    setOpenCharts(updatedCharts);
+    
+    // 5. Zet je actieve scherm op de laatst geopende grafiek
+    if (lastOpenedChartId) {
+      setActiveView(lastOpenedChartId);
+    }
   };
 
   const closeChart = (chartId, e) => {
@@ -73,7 +102,7 @@ export default function App() {
         openCharts={openCharts} 
         closeChart={closeChart} 
         runningBots={runningBots}
-        openBotChart={(bot) => handleOpenChart({ symbol: bot.settings.symbol, timeframe: bot.settings.timeframe })}
+        openBotChart={openBotChart} // NU GEKOPPELD AAN DE NIEUWE FUNCTIE
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -125,7 +154,6 @@ export default function App() {
         </main>
       </div>
 
-      {/* FULLSCREEN BUILDER OVERLAY */}
       {showBuilder && (
         <div className="absolute inset-0 z-[100] bg-[#0b0e11]">
            <BotBuilder closeBuilder={() => setShowBuilder(false)} editingBot={editingBot} />

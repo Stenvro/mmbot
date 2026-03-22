@@ -14,7 +14,6 @@ const safeParseTime = (ts) => {
   return isNaN(parsed) ? null : parsed;
 };
 
-// NIEUW: Helper om je timeframe om te rekenen naar seconden
 const getTimeframeSeconds = (tf) => {
     if (!tf) return 60;
     const val = parseInt(tf);
@@ -91,7 +90,12 @@ export default function ChartEngine({ dataset }) {
   const initBotConfigs = async () => {
     try {
       const botRes = await apiClient.get('/api/bots/');
-      const validBots = botRes.data.filter(b => b.settings?.symbol === dataset.symbol && b.settings?.timeframe === dataset.timeframe);
+      
+      // FIX 1: Controleer of de huidige grafiek (dataset.symbol) voorkomt in de LIJST (symbols) van de bot!
+      const validBots = botRes.data.filter(b => {
+          const syms = b.settings?.symbols || (b.settings?.symbol ? [b.settings.symbol] : []);
+          return syms.includes(dataset.symbol) && b.settings?.timeframe === dataset.timeframe;
+      });
       
       setBotConfigs(prev => {
          const newConfigs = { ...prev };
@@ -168,7 +172,6 @@ export default function ChartEngine({ dataset }) {
         lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
         if (!isCrosshairActive.current) setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
         
-        // FIX: Bepaal direct bij inladen of de data live is (timeframe in seconden + 2 minuut speling)
         const tfSeconds = getTimeframeSeconds(dataset.timeframe);
         setIsLiveStreamActive(((Date.now() / 1000) - lastCandleRef.current.time) < (tfSeconds + 120));
       }
@@ -198,7 +201,6 @@ export default function ChartEngine({ dataset }) {
             const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value, time: latestDbCandle.time };
             if (!isCrosshairActive.current) setHoverData(newHoverState);
             
-            // FIX: Dynamische check (timeframe + 2 minuten speling) in plaats van hardcoded 180s
             const tfSeconds = getTimeframeSeconds(dataset.timeframe);
             setIsLiveStreamActive(((Date.now() / 1000) - latestDbCandle.time) < (tfSeconds + 120));
             
@@ -239,9 +241,10 @@ export default function ChartEngine({ dataset }) {
         volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
         volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
+        // FIX 2: De chart haalt nu standaard de laatste 3000 candles op voor een enorme geschiedenis!
         const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, { 
             headers: { 'x-timeframe': dataset.timeframe },
-            params: { limit: 500 }
+            params: { limit: 3000 }
         });
 
         if (!response.data || response.data.length === 0) {
@@ -472,6 +475,8 @@ export default function ChartEngine({ dataset }) {
           return newState;
       });
   };
+
+  const toggleMenuBot = (botName) => setExpandedMenuBot(expandedMenuBot === botName ? null : botName);
 
   const formatChange = (num) => {
     if (num === undefined || num === null) return 'N/A';

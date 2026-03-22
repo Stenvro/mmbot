@@ -96,7 +96,6 @@ class BotManager:
             elif sl['type'] == 'atr' and df is not None:
                 import pandas_ta_classic as ta
                 multiplier = float(sl['value'])
-                # Bereken snelle 14-period ATR
                 atr_series = ta.atr(df['high'], df['low'], df['close'], length=14)
                 current_atr = atr_series.iloc[-1] if atr_series is not None and not atr_series.empty else 0
                 trigger_price = state['highest_price'] - (multiplier * current_atr)
@@ -134,16 +133,19 @@ class BotManager:
 
         return close_triggered, close_qty, close_reason
 
+    # FIX: Aangepaste startup functie om de async loop safe te houden
     async def _startup_backfill(self):
-        def run():
+        def get_active_bot_ids():
             db = SessionLocal()
             try:
                 active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
-                for bot in active_bots:
-                    asyncio.run_coroutine_threadsafe(self._backfill_bot(bot.id), asyncio.get_running_loop())
+                return [bot.id for bot in active_bots]
             finally:
                 db.close()
-        await asyncio.to_thread(run)
+                
+        bot_ids = await asyncio.to_thread(get_active_bot_ids)
+        for bot_id in bot_ids:
+            asyncio.create_task(self._backfill_bot(bot_id))
 
     async def _listen_for_bot_starts(self):
         queue = event_bus.subscribe("BOT_STATE_CHANGED")
@@ -167,99 +169,98 @@ class BotManager:
                 is_api_exec = bot.settings.get("api_execution", False)
                 has_key = bool(bot.settings.get("api_key_name"))
                 
-                # Jouw originele fallback: Forward Test
                 live_mode = "forward_test"
                 if is_api_exec and has_key:
                     api_key = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
                     if api_key: live_mode = "paper" if api_key.is_sandbox else "live"
 
-                symbol = bot.settings.get("symbol")
                 timeframe = bot.settings.get("timeframe")
                 exit_node = bot.settings.get("exit_node")
                 run_backtest = bot.settings.get("backtest_on_start", False)
-                
-                # HIER DE LOOKBACK UITGELEZEN
                 lookback_limit = int(bot.settings.get("backtest_lookback", 150))
 
-                # HIER DE QUERY AANGEPAST MET DESC().LIMIT()
-                query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
-                    Candle.symbol == symbol, Candle.timeframe == timeframe
-                ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
-                
-                df = pd.read_sql(query, db.bind)
-                if df.empty: return
-                
-                # OMDRAAIEN ZODAT ZE WEER CHRONOLOGISCH STAAN
-                df = df.sort_values('timestamp').reset_index(drop=True)
+                symbols = bot.settings.get("symbols", [])
+                if not symbols and bot.settings.get("symbol"):
+                    symbols = [bot.settings.get("symbol")]
 
-                evaluator = NodeEvaluator(bot.settings)
-                evaluator.df = df.copy()
-                evaluator._calculate_indicators() 
+                for symbol in symbols:
+                    query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
+                        Candle.symbol == symbol, Candle.timeframe == timeframe
+                    ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
+                    
+                    df = pd.read_sql(query, db.bind)
+                    if df.empty: continue
+                    
+                    df = df.sort_values('timestamp').reset_index(drop=True)
 
-                existing_timestamps = {s[0] for s in db.query(Signal.timestamp).filter(Signal.bot_name == bot.name).all()}
-                
-                open_bt_pos = None
-                last_bt_ts = None
-                
-                if run_backtest:
-                    last_order = db.query(Order).filter(Order.bot_name == bot.name, Order.mode == "backtest").order_by(Order.timestamp.desc()).first()
-                    if last_order: last_bt_ts = last_order.timestamp
-                    open_bt_pos = db.query(Position).filter(Position.bot_name == bot.name, Position.mode == "backtest", Position.status == "open").first()
+                    evaluator = NodeEvaluator(bot.settings)
+                    evaluator.df = df.copy()
+                    evaluator._calculate_indicators() 
 
-                new_signals = []
-                standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
-                just_opened_this_tick = False
+                    existing_timestamps = {s[0] for s in db.query(Signal.timestamp).filter(Signal.bot_name == bot.name, Signal.symbol == symbol).all()}
+                    
+                    open_bt_pos = None
+                    last_bt_ts = None
+                    
+                    if run_backtest:
+                        last_order = db.query(Order).filter(Order.bot_name == bot.name, Order.symbol == symbol, Order.mode == "backtest").order_by(Order.timestamp.desc()).first()
+                        if last_order: last_bt_ts = last_order.timestamp
+                        open_bt_pos = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.mode == "backtest", Position.status == "open").first()
 
-                for index, row in evaluator.df.iterrows():
-                    ts = row['timestamp']
-                    current_price = float(row['close'])
+                    new_signals = []
+                    standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
                     just_opened_this_tick = False
-                    
-                    try: is_buy = bool(evaluator.resolve_node(bot.settings.get("entry_node"), index))
-                    except Exception: is_buy = False
-                    
-                    try: is_sell = bool(evaluator.resolve_node(exit_node, index)) if exit_node else False
-                    except Exception: is_sell = False
 
-                    if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
-                        max_pos = int(bot.settings.get("max_positions", 1))
+                    for index, row in evaluator.df.iterrows():
+                        ts = row['timestamp']
+                        current_price = float(row['close'])
+                        just_opened_this_tick = False
                         
-                        if is_buy and not open_bt_pos and 1 <= max_pos:
-                            trade_amount = self._calculate_trade_amount(current_price, bot.settings)
-                            open_bt_pos = Position(bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=current_price, amount=trade_amount)
-                            db.add(open_bt_pos)
-                            db.flush() 
-                            db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=ts, status="filled"))
-                            just_opened_this_tick = True
+                        try: is_buy = bool(evaluator.resolve_node(bot.settings.get("entry_node"), index))
+                        except Exception: is_buy = False
+                        
+                        try: is_sell = bool(evaluator.resolve_node(exit_node, index)) if exit_node else False
+                        except Exception: is_sell = False
 
-                        elif open_bt_pos and not just_opened_this_tick:
-                            close_triggered, close_qty, close_reason = self._check_exits(open_bt_pos, current_price, is_sell, bot.settings)
+                        if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
+                            max_pos = int(bot.settings.get("max_positions", 1))
                             
-                            if close_triggered and close_qty > 0:
-                                close_qty = min(close_qty, open_bt_pos.amount)
-                                
-                                db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=ts, status="filled"))
-                                
-                                realized_pnl = (current_price - open_bt_pos.entry_price) * close_qty
-                                open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
-                                open_bt_pos.profit_pct = ((current_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
-                                
-                                if close_qty >= open_bt_pos.amount - 0.00001:
-                                    open_bt_pos.status = "closed"
-                                    open_bt_pos.closed_at = ts
-                                    open_bt_pos = None 
-                                else:
-                                    open_bt_pos.amount -= close_qty 
+                            if is_buy and not open_bt_pos and 1 <= max_pos:
+                                trade_amount = self._calculate_trade_amount(current_price, bot.settings)
+                                open_bt_pos = Position(bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=current_price, amount=trade_amount)
+                                db.add(open_bt_pos)
+                                db.flush() 
+                                db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=ts, status="filled"))
+                                just_opened_this_tick = True
 
-                    if ts not in existing_timestamps:
-                        indicators = { col: float(row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(row[col]) }
-                        if indicators:
-                            action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
-                            new_signals.append(Signal(candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
+                            elif open_bt_pos and not just_opened_this_tick:
+                                close_triggered, close_qty, close_reason = self._check_exits(open_bt_pos, current_price, is_sell, bot.settings, evaluator.df.iloc[:index+1])
+                                
+                                if close_triggered and close_qty > 0:
+                                    close_qty = min(close_qty, open_bt_pos.amount)
+                                    
+                                    db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=ts, status="filled"))
+                                    
+                                    realized_pnl = (current_price - open_bt_pos.entry_price) * close_qty
+                                    open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
+                                    open_bt_pos.profit_pct = ((current_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
+                                    
+                                    if close_qty >= open_bt_pos.amount - 0.00001:
+                                        open_bt_pos.status = "closed"
+                                        open_bt_pos.closed_at = ts
+                                        open_bt_pos = None 
+                                    else:
+                                        open_bt_pos.amount -= close_qty 
 
-                if new_signals: db.bulk_save_objects(new_signals)
-                db.commit()
-                print(f"✅ Sync Complete: '{bot.name}' (Target Mode: {live_mode.upper()})")
+                        if ts not in existing_timestamps:
+                            indicators = { col: float(row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(row[col]) }
+                            if indicators:
+                                action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
+                                new_signals.append(Signal(candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
+
+                    if new_signals: db.bulk_save_objects(new_signals)
+                    db.commit()
+                    print(f"✅ Sync Complete: '{bot.name}' on {symbol} (Target Mode: {live_mode.upper()}) | Lookback: {lookback_limit}")
 
             except Exception as e:
                 print(f"❌ Backfill Error: {e}")
@@ -273,10 +274,17 @@ class BotManager:
             db = SessionLocal()
             try:
                 active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
-                matching_bots = [b for b in active_bots if b.settings.get("symbol") == symbol and b.settings.get("timeframe") == timeframe]
+                
+                matching_bots = []
+                for b in active_bots:
+                    syms = b.settings.get("symbols", [])
+                    if not syms and b.settings.get("symbol"):
+                        syms = [b.settings.get("symbol")]
+                    if symbol in syms and b.settings.get("timeframe") == timeframe:
+                        matching_bots.append(b)
+
                 if not matching_bots: return
 
-                # HIER BEPALEN WE DE MAX LOOKBACK VOOR ALLE BOTS DIE NU TRIGGEREN
                 max_lookback = max([int(b.settings.get("backtest_lookback", 150)) for b in matching_bots], default=150)
 
                 query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
@@ -305,7 +313,6 @@ class BotManager:
                         is_sell = bool(evaluator.resolve_node(exit_node, latest_index)) if exit_node else False
                     except Exception: is_sell = False
 
-                    # Jouw API Router Check
                     is_api_exec = bot.settings.get("api_execution", False)
                     has_key = bool(bot.settings.get("api_key_name"))
                     mode = "forward_test"
@@ -358,7 +365,7 @@ class BotManager:
                     for pos in active_positions:
                         if pos.id in just_opened_ids: continue 
                             
-                        close_triggered, close_qty, close_reason = self._check_exits(pos, current_price, is_sell, bot.settings)
+                        close_triggered, close_qty, close_reason = self._check_exits(pos, current_price, is_sell, bot.settings, evaluator.df)
 
                         if close_triggered and close_qty > 0:
                             close_qty = min(close_qty, pos.amount)
@@ -394,7 +401,7 @@ class BotManager:
                     standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
                     indicators = { col: float(latest_row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(latest_row[col]) }
 
-                    existing_signal = db.query(Signal).filter(Signal.bot_name == bot.name, Signal.timestamp == latest_time).first()
+                    existing_signal = db.query(Signal).filter(Signal.bot_name == bot.name, Signal.symbol == symbol, Signal.timestamp == latest_time).first()
                     if not existing_signal and indicators:
                         action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
                         db.add(Signal(candle_id=int(latest_row['id']), symbol=symbol, timestamp=latest_time, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))

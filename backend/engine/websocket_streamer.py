@@ -18,50 +18,66 @@ class OKXStreamer:
         self.exchange = ccxt.okx()
         self.needs_reconnect = False 
 
-    def _get_active_subscriptions(self) -> set:
+    def _get_active_subscriptions(self) -> dict:
         db: Session = SessionLocal()
-        unique_subs = set()
+        # FIX 1: We gebruiken nu een dictionary om ook de lookback_limit per symbool op te slaan!
+        subs_dict = {} 
         try:
             active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
             for bot in active_bots:
                 settings = bot.settings or {}
-                symbol = settings.get("symbol")
-                timeframe = settings.get("timeframe")
                 
-                if symbol and timeframe:
-                    okx_inst_id = symbol.replace("/", "-").upper()
-                    tf = timeframe.lower()
-                    if tf == "1h": tf = "1H" 
-                    elif tf == "4h": tf = "4H"
-                    unique_subs.add((f"candle{tf}", okx_inst_id))
-            return unique_subs
+                # FIX 2: Haal de volledige symbols lijst op in plaats van alleen de eerste string
+                symbols = settings.get("symbols", [])
+                if not symbols and settings.get("symbol"):
+                    symbols = [settings.get("symbol")]
+                    
+                timeframe = settings.get("timeframe")
+                lookback = int(settings.get("backtest_lookback", 500)) # Gebruik bot lookback, default naar 500
+                
+                if symbols and timeframe:
+                    for sym in symbols:
+                        okx_inst_id = sym.replace("/", "-").upper()
+                        tf = timeframe.lower()
+                        if tf == "1h": tf = "1H" 
+                        elif tf == "4h": tf = "4H"
+                        
+                        sub_key = (f"candle{tf}", okx_inst_id)
+                        
+                        # Als er meerdere bots op hetzelfde symbool zitten, pak de grootste lookback
+                        if sub_key in subs_dict:
+                            subs_dict[sub_key] = max(subs_dict[sub_key], lookback)
+                        else:
+                            subs_dict[sub_key] = lookback
+                            
+            return subs_dict
         finally:
             db.close()
 
-    def _sync_historical_gaps(self, subscriptions):
+    def _sync_historical_gaps(self, subscriptions_dict: dict):
         db: Session = SessionLocal()
-        DEFAULT_LOOKBACK_CANDLES = 500
 
         try:
-            for channel, inst_id in subscriptions:
+            # FIX 3: Loop door de dictionary en gebruik de custom lookback per symbool
+            for (channel, inst_id), lookback_limit in subscriptions_dict.items():
                 symbol = inst_id.replace("-", "/")
                 timeframe = channel.replace("candle", "").lower()
                 tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
                 
-                last_candle = db.query(Candle).filter(
-                    Candle.symbol == symbol, Candle.timeframe == timeframe
-                ).order_by(Candle.timestamp.desc()).first()
+                # We berekenen de 'since' datum ALTIJD opnieuw op basis van de gevraagde lookback
+                # Dit voorkomt dat hij niet genoeg data ophaalt als je de lookback later verhoogt.
+                now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                since = now_ms - ((lookback_limit + 10) * tf_ms) # +10 voor wat veilige speling
                 
-                if last_candle:
-                    since = int(last_candle.timestamp.timestamp() * 1000)
-                    print(f"🔄 Resuming {symbol} ({timeframe})...")
-                else:
-                    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                    since = now_ms - (DEFAULT_LOOKBACK_CANDLES * tf_ms)
-                    print(f"📥 Baseline sync {symbol} ({timeframe})...")
+                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching {lookback_limit} candles...")
                     
                 while True:
-                    ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=100)
+                    try:
+                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=100)
+                    except Exception as ex:
+                        print(f"⚠️ Warning: Could not fetch {symbol} from OKX: {ex}")
+                        break
+                        
                     if not ohlcv or len(ohlcv) <= 1:
                         break
                     
@@ -73,7 +89,6 @@ class OKXStreamer:
                         Candle.timestamp >= start_dt, Candle.timestamp <= end_dt
                     ).all()
                     
-                    # FIX: SQLite drops timezone info sometimes. Force UTC comparison.
                     existing_times = set()
                     for c in existing_candles:
                         ts = c[0]
@@ -124,14 +139,14 @@ class OKXStreamer:
         while self.running:
             try:
                 self.needs_reconnect = False
-                subs_set = self._get_active_subscriptions()
+                subs_dict = self._get_active_subscriptions()
                 
-                if not subs_set:
+                if not subs_dict:
                     await asyncio.sleep(2)
                     continue
                 
-                self._sync_historical_gaps(subs_set)
-                args = [{"channel": c, "instId": i} for c, i in subs_set]
+                self._sync_historical_gaps(subs_dict)
+                args = [{"channel": c, "instId": i} for c, i in subs_dict.keys()]
 
                 async with websockets.connect(OKX_WS_URL) as ws:
                     self.ws = ws
