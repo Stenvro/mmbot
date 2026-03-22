@@ -13,13 +13,12 @@ from backend.models.candles import Candle
 from backend.models.signals import Signal
 from backend.models.preferences import Preference
 from backend.models.exchange_keys import ExchangeKey
-from backend.models.bots import BotConfig  # <-- Added BotConfig
+from backend.models.bots import BotConfig  
 
 # Import the routers
-from backend.routers import keys, data, bots  # <-- Added bots router
-
+from backend.routers import keys, data, bots, trades  
 # Import the background services
-from backend.engine.websocket_streamer import okx_streamer  # <-- Added OKX Streamer
+from backend.engine.websocket_streamer import okx_streamer  
 from backend.engine.bot_manager import bot_manager
 
 # Create database tables
@@ -30,11 +29,11 @@ Base.metadata.create_all(bind=engine)
 async def lifespan(app: FastAPI):
     # Start achtergrond processen
     stream_task = asyncio.create_task(okx_streamer.start())
-    bot_task = asyncio.create_task(bot_manager.start()) # <-- DEZE REGEL TOEGEVOEGD
+    bot_task = asyncio.create_task(bot_manager.start()) 
     yield
     # Stop ze netjes
     okx_streamer.stop()
-    bot_manager.stop() # <-- DEZE REGEL TOEGEVOEGD
+    bot_manager.stop() 
     await stream_task
     await bot_task
 
@@ -43,13 +42,14 @@ app = FastAPI(
     title="ApexAlgo Engine API", 
     version="0.1.0",
     swagger_ui_init_oauth={"clientId": "test"},
-    lifespan=lifespan  # <-- Attached lifespan here
+    lifespan=lifespan  
 )
 
 # Connect routers to the main application
 app.include_router(keys.router)
 app.include_router(data.router)
-app.include_router(bots.router)  # <-- Attached bots router
+app.include_router(bots.router)  
+app.include_router(trades.router)
 
 # Initialize Exchange (CCXT)
 exchange = ccxt.okx({'hostname': 'eea.okx.com'})

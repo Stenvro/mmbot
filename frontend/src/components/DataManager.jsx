@@ -6,10 +6,9 @@ export default function DataManager({ openChart, setError }) {
   const [loading, setLoading] = useState(false);
   const [syncingSymbol, setSyncingSymbol] = useState(null);
   
-  // AANGEPASTE STANDAARDWAARDEN:
   const [symbol, setSymbol] = useState('BTC-EUR');
-  const [timeframe, setTimeframe] = useState('1d'); // Standaard op 1d
-  const [startDate, setStartDate] = useState('2025-01-01T00:00'); // Standaard op 1-1-2025
+  const [timeframe, setTimeframe] = useState('1d'); 
+  const [startDate, setStartDate] = useState('2025-01-01T00:00'); 
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 16));
 
   const fetchSummary = async () => {
@@ -25,7 +24,6 @@ export default function DataManager({ openChart, setError }) {
     fetchSummary();
   }, []);
 
-  // Standaard handmatige download
   const handleDownload = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -46,22 +44,17 @@ export default function DataManager({ openChart, setError }) {
     setLoading(false);
   };
 
-  // Sync tot het huidige moment (inclusief 404 fix)
   const handleSync = async (row) => {
     setSyncingSymbol(`${row.symbol}_${row.timeframe}`);
     setError(null);
     try {
       const payload = {
         timeframe: row.timeframe,
-        // Start met zoeken vanaf de nieuwste opgeslagen kaars in de DB
         start_date: new Date(row.newest_candle).toISOString(),
-        // Tot exact nu
         end_date: new Date().toISOString()
       };
 
-      // FIX: Vervang de slash door een streepje voor de URL (voorkomt de 404 error)
       const safeSymbol = row.symbol.replace('/', '-');
-
       const response = await apiClient.post(`/api/data/fetch/${safeSymbol}`, payload);
       alert(`Sync Complete for ${row.symbol}: ${response.data.new_saved} new candles fetched and added to vault.`);
       fetchSummary();
@@ -71,14 +64,29 @@ export default function DataManager({ openChart, setError }) {
     setSyncingSymbol(null);
   };
 
+  // VERNIEUWDE DELETE FUNCTIE (Ondersteunt "Prunen" voor een bepaalde datum)
   const handleDelete = async (delSymbol, delTimeframe) => {
-    if (!window.confirm(`Are you sure you want to delete all ${delSymbol} data for timeframe ${delTimeframe}?`)) return;
+    const pruneDateStr = window.prompt(
+      `Verwijder data voor ${delSymbol} (${delTimeframe})\n\n` +
+      `Optie 1: Typ een datum (bijv. 2025-01-01) om alles DAARVOOR te wissen.\n` +
+      `Optie 2: Laat leeg en druk op OK om ALLES van deze munt te wissen.`
+    );
+
+    if (pruneDateStr === null) return; // Cancel ingedrukt
+
     setLoading(true);
     try {
-      await apiClient.delete(`/api/data?symbol=${delSymbol}&timeframe=${delTimeframe}`);
+      let endpoint = `/api/data?symbol=${delSymbol}&timeframe=${delTimeframe}`;
+      if (pruneDateStr.trim() !== "") {
+          const isoDate = new Date(pruneDateStr).toISOString();
+          endpoint += `&before_date=${isoDate}`;
+      }
+
+      const res = await apiClient.delete(endpoint);
+      alert(res.data.message);
       fetchSummary();
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message);
     }
     setLoading(false);
   };
@@ -86,7 +94,6 @@ export default function DataManager({ openChart, setError }) {
   return (
     <div className="max-w-6xl mx-auto space-y-6 w-full fade-in">
       
-      {/* DOWNLOAD FORMULIER */}
       <div className="bg-[#181a20] border border-[#2b3139] p-5 rounded shadow-sm">
         <h3 className="text-[#848e9c] text-xs font-bold mb-4 uppercase tracking-wider">Download Market Data</h3>
         <form onSubmit={handleDownload} className="flex flex-wrap gap-4 items-end">
@@ -117,7 +124,6 @@ export default function DataManager({ openChart, setError }) {
         </form>
       </div>
 
-      {/* OPSLAG OVERZICHT TABEL */}
       <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-sm overflow-hidden">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -165,7 +171,7 @@ export default function DataManager({ openChart, setError }) {
                       disabled={isSyncing || loading}
                       className="text-[#f6465d] hover:text-[#f6465d]/80 font-medium transition-colors disabled:opacity-50"
                     >
-                      Delete
+                      Prune / Delete
                     </button>
                   </td>
                 </tr>

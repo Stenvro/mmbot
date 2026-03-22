@@ -29,6 +29,13 @@ export default function Sidebar({ activeView, setActiveView, openCharts, closeCh
         >
           Trading Bots
         </button>
+
+        <button
+          onClick={() => setActiveView('trades')}
+          className={`w-full text-left px-4 py-2.5 text-sm font-medium rounded transition-colors ${activeView === 'trades' ? 'bg-[#2b3139] text-white' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}
+        >
+          Trade Analytics
+        </button>
         
         {/* RUNNING BOTS DIRECT LINKS */}
         {runningBots && runningBots.length > 0 && (

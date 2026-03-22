@@ -7,15 +7,22 @@ class Position(Base):
     __tablename__ = "positions"
 
     id = Column(Integer, primary_key=True, index=True)
-    bot_name = Column(String, index=True)               # Welke bot beheert dit?
-    symbol = Column(String, index=True)                 # Bijv. "SOL/USDT"
+    bot_name = Column(String, index=True)               
+    symbol = Column(String, index=True)                 
     
-    status = Column(String, default="open")             # "open" of "closed"
+    # CRUCIAAL VOOR BELASTING/BOEKHOUDING: 'live', 'paper', of 'backtest'
+    mode = Column(String, default="paper", index=True) 
     
-    profit_abs = Column(Float, nullable=True)           # Totale winst in geld 
-    profit_pct = Column(Float, nullable=True)           # Totale winst in procenten
+    status = Column(String, default="open", index=True) # "open" of "closed"
+    side = Column(String, default="long")               # "long" of "short"
+    
+    entry_price = Column(Float, nullable=True)          # Gemiddelde koopprijs
+    amount = Column(Float, default=0.0)                 # Totale grootte van positie
+    
+    profit_abs = Column(Float, nullable=True)           # Winst in USDT/EUR
+    profit_pct = Column(Float, nullable=True)           # Winst in procenten
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     closed_at = Column(DateTime, nullable=True)
 
-    orders = relationship("Order", back_populates="position")
+    orders = relationship("Order", back_populates="position", cascade="all, delete-orphan")

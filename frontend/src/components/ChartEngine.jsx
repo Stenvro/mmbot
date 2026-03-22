@@ -30,8 +30,11 @@ export default function ChartEngine({ dataset }) {
   const volumeSeriesRef = useRef(null);
   const indicatorSeriesRef = useRef({}); 
   const markersPluginRef = useRef(null); 
+  const priceLinesRef = useRef([]); 
   const lastCandleRef = useRef(null); 
   const isCrosshairActive = useRef(false);
+  
+  const [candleTimes, setCandleTimes] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -40,6 +43,9 @@ export default function ChartEngine({ dataset }) {
   const [isLiveStreamActive, setIsLiveStreamActive] = useState(false);
 
   const [signals, setSignals] = useState([]);
+  const [orders, setOrders] = useState([]); 
+  const [positions, setPositions] = useState([]); 
+  
   const [showMenu, setShowMenu] = useState(false);
   const [expandedMenuBot, setExpandedMenuBot] = useState(null); 
   const [botConfigs, setBotConfigs] = useState({});
@@ -58,11 +64,11 @@ export default function ChartEngine({ dataset }) {
       
       const newConfigs = {};
       validBots.forEach(bot => {
-         newConfigs[bot.name] = { showMarkers: false, indicators: {} };
+         newConfigs[bot.name] = { showSignals: false, showTrades: true, showPositions: true, indicators: {} };
          if (bot.settings && bot.settings.nodes) {
              Object.values(bot.settings.nodes).forEach(node => {
                  if (node.class === 'indicator') {
-                     const suffix = node.params?.length ? `_${node.params.length}` : '';
+                     const suffix = node.params && node.params.length > 0 ? `_${node.params.join('_')}` : '';
                      const indName = `${node.method.toUpperCase()}${suffix}`;
                      newConfigs[bot.name].indicators[indName] = false; 
                  }
@@ -73,47 +79,39 @@ export default function ChartEngine({ dataset }) {
     } catch (e) { console.error("Error setting up configs", e); }
   };
 
-  const pollSignals = async () => {
+  const pollData = async () => {
     try {
-      const sigRes = await apiClient.get(`/api/bots/signals`, {
-        params: { symbol: dataset.symbol, timeframe: dataset.timeframe }
-      });
+      const safeSymbol = dataset.symbol.replace('/', '-');
+      const [sigRes, ordRes, posRes] = await Promise.all([
+          apiClient.get(`/api/bots/signals`, { params: { symbol: dataset.symbol, timeframe: dataset.timeframe } }),
+          apiClient.get(`/api/trades/orders?symbol=${safeSymbol}`),
+          apiClient.get(`/api/trades/positions?symbol=${safeSymbol}`)
+      ]);
       setSignals(sigRes.data || []);
-    } catch (e) { console.error("Signal Fetch Error:", e); }
+      setOrders(ordRes.data || []);
+      setPositions(posRes.data || []);
+    } catch (e) { console.error("Data Fetch Error:", e); }
   };
-
-  // Lookup-map om razendsnel de extra data te vinden als de muis beweegt
-  const signalMapByTime = useMemo(() => {
-    const map = {};
-    signals.forEach(sig => {
-      const t = safeParseTime(sig.timestamp);
-      if (!t) return;
-      if (!map[t]) map[t] = {};
-      
-      let parsedExtra = {};
-      try {
-        parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {});
-      } catch (e) {}
-
-      map[t][sig.bot_name] = { ...sig, extra_data: parsedExtra };
-    });
-    return map;
-  }, [signals]);
 
   const applyInitialDataToChart = (rawData) => {
     if (!rawData || rawData.length === 0) return;
     const uniqueData = [];
     const seenTimes = new Set();
+    const extractedTimes = [];
     
     rawData.forEach(item => {
         const safeTime = safeParseTime(item.time || item.timestamp);
         if (safeTime && !seenTimes.has(safeTime)) {
             seenTimes.add(safeTime);
+            extractedTimes.push(safeTime);
             uniqueData.push({ time: safeTime, open: item.open, high: item.high, low: item.low, close: item.close, value: item.volume || item.value });
         }
     });
     
     uniqueData.sort((a, b) => a.time - b.time);
+    extractedTimes.sort((a, b) => a - b);
+    
+    setCandleTimes(extractedTimes);
     
     try {
       candleSeriesRef.current.setData(uniqueData);
@@ -125,7 +123,7 @@ export default function ChartEngine({ dataset }) {
       if (uniqueData.length > 0) {
         lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
         if (!isCrosshairActive.current) {
-             setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
+            setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
         }
       }
     } catch (e) { console.error("Data Load Crash Prevented:", e); }
@@ -151,8 +149,15 @@ export default function ChartEngine({ dataset }) {
                 value: latestDbCandle.volume || latestDbCandle.value,
                 color: latestDbCandle.close >= latestDbCandle.open ? '#2ebd8580' : '#f6465d80'
             });
-            const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value, time: latestDbCandle.time };
             
+            setCandleTimes(prev => {
+                if (!prev.includes(latestDbCandle.time)) {
+                    return [...prev, latestDbCandle.time].sort((a,b) => a-b);
+                }
+                return prev;
+            });
+
+            const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value, time: latestDbCandle.time };
             if (!isCrosshairActive.current) setHoverData(newHoverState);
             
             const isFresh = (Date.now() / 1000) - latestDbCandle.time < 180;
@@ -166,7 +171,7 @@ export default function ChartEngine({ dataset }) {
   useEffect(() => {
     fetchMarketInfo();
     initBotConfigs(); 
-    pollSignals();    
+    pollData();    
 
     const infoInterval = setInterval(fetchMarketInfo, 60000); 
 
@@ -227,7 +232,7 @@ export default function ChartEngine({ dataset }) {
 
     initChart();
     const pollInterval = setInterval(updateLatestCandles, 1000);
-    const signalInterval = setInterval(pollSignals, 3000); 
+    const signalInterval = setInterval(pollData, 3000); 
     
     return () => { 
       clearInterval(infoInterval);
@@ -237,42 +242,132 @@ export default function ChartEngine({ dataset }) {
     };
   }, [dataset.symbol, dataset.timeframe]);
 
-  useEffect(() => {
-    if (!chartRef.current || !candleSeriesRef.current || signals.length === 0) return;
-    
-    const markersByTime = {};
-    signals.forEach(sig => {
-      if (botConfigs[sig.bot_name]?.showMarkers && (sig.action === 'buy' || sig.action === 'sell')) {
-        const markerTime = safeParseTime(sig.timestamp);
-        if (!markerTime) return; 
 
-        if (!markersByTime[markerTime]) markersByTime[markerTime] = [];
-        markersByTime[markerTime].push(sig);
+  const snappedSignalMap = useMemo(() => {
+    const map = {};
+    if (!candleTimes || candleTimes.length === 0) return map;
+
+    const getSnappedTime = (rawTime) => {
+        let closest = candleTimes[0];
+        let minDiff = Math.abs(rawTime - closest);
+        for (let i = 1; i < candleTimes.length; i++) {
+            const diff = Math.abs(rawTime - candleTimes[i]);
+            if (diff < minDiff) { minDiff = diff; closest = candleTimes[i]; }
+            if (diff === 0) break;
+        }
+        return minDiff <= 3600 ? closest : null;
+    };
+
+    signals.forEach(sig => {
+      const rawTime = safeParseTime(sig.timestamp);
+      if (!rawTime) return;
+      
+      const snappedTime = getSnappedTime(rawTime);
+      if (!snappedTime) return;
+
+      if (!map[snappedTime]) map[snappedTime] = {};
+      
+      let parsedExtra = {};
+      try {
+        parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {});
+      } catch (e) {}
+
+      map[snappedTime][sig.bot_name] = { ...sig, extra_data: parsedExtra };
+    });
+    return map;
+  }, [signals, candleTimes]);
+
+
+  useEffect(() => {
+    if (!chartRef.current || !candleSeriesRef.current || candleTimes.length === 0) return;
+    
+    const getSnappedTime = (rawTime) => {
+        let closest = candleTimes[0];
+        let minDiff = Math.abs(rawTime - closest);
+        for (let i = 1; i < candleTimes.length; i++) {
+            const diff = Math.abs(rawTime - candleTimes[i]);
+            if (diff < minDiff) { minDiff = diff; closest = candleTimes[i]; }
+            if (diff === 0) break; 
+        }
+        return minDiff <= 3600 ? closest : null; 
+    };
+
+    const markersByTime = {};
+    
+    signals.forEach(sig => {
+      if (botConfigs[sig.bot_name]?.showSignals && (sig.action === 'buy' || sig.action === 'sell')) {
+        const rawTime = safeParseTime(sig.timestamp);
+        if (!rawTime) return; 
+        const snappedTime = getSnappedTime(rawTime);
+        if (!snappedTime) return; 
+        if (!markersByTime[snappedTime]) markersByTime[snappedTime] = [];
+        markersByTime[snappedTime].push({ type: 'signal', data: sig });
       }
+    });
+
+    orders.forEach(order => {
+        if (botConfigs[order.bot_name]?.showTrades) {
+            const rawTime = safeParseTime(order.timestamp);
+            if (!rawTime) return;
+            const snappedTime = getSnappedTime(rawTime);
+            if (!snappedTime) return;
+            if (!markersByTime[snappedTime]) markersByTime[snappedTime] = [];
+            markersByTime[snappedTime].push({ type: 'trade', data: order });
+        }
     });
 
     const finalMarkers = [];
     Object.keys(markersByTime).forEach(timeStr => {
         const time = parseInt(timeStr);
-        const sigsAtTime = markersByTime[time];
-        const buySigs = sigsAtTime.filter(s => s.action === 'buy');
-        const sellSigs = sigsAtTime.filter(s => s.action === 'sell');
+        const itemsAtTime = markersByTime[time];
+        
+        const buySigs = itemsAtTime.filter(i => i.type === 'signal' && i.data.action === 'buy');
+        const sellSigs = itemsAtTime.filter(i => i.type === 'signal' && i.data.action === 'sell');
+        const buyTrades = itemsAtTime.filter(i => i.type === 'trade' && i.data.side === 'buy');
+        const sellTrades = itemsAtTime.filter(i => i.type === 'trade' && i.data.side === 'sell');
         
         if (buySigs.length > 0) finalMarkers.push({
-            time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp', text: 'B'
+            time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp', text: 'S-B'
         });
         if (sellSigs.length > 0) finalMarkers.push({
-            time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown', text: 'S'
+            time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown', text: 'S-S' 
+        });
+        if (buyTrades.length > 0) finalMarkers.push({
+            time: time, position: 'belowBar', color: '#0ea5e9', shape: 'circle', text: 'T-BUY'
+        });
+        if (sellTrades.length > 0) finalMarkers.push({
+            time: time, position: 'aboveBar', color: '#d946ef', shape: 'circle', text: 'T-SELL'
         });
     });
 
     finalMarkers.sort((a, b) => a.time - b.time);
     
     try { 
-      if (markersPluginRef.current) {
-        markersPluginRef.current.setMarkers(finalMarkers); 
-      }
+      if (markersPluginRef.current) markersPluginRef.current.setMarkers(finalMarkers); 
     } catch (e) { console.error("[CRITICAL] Marker Render Crash:", e); }
+
+
+    priceLinesRef.current.forEach(line => {
+        try { candleSeriesRef.current.removePriceLine(line); } catch(e){}
+    });
+    priceLinesRef.current = [];
+
+    positions.forEach(pos => {
+        if (pos.status === 'open' && botConfigs[pos.bot_name]?.showPositions) {
+            const priceLine = {
+                price: pos.entry_price,
+                color: pos.side === 'long' ? '#2ebd85' : '#f6465d',
+                lineWidth: 2,
+                lineStyle: 2, 
+                axisLabelVisible: true,
+                title: `ENTRY (${pos.bot_name})`,
+            };
+            try {
+                const lineObj = candleSeriesRef.current.createPriceLine(priceLine);
+                priceLinesRef.current.push(lineObj);
+            } catch(e) { console.error("Error drawing position line:", e); }
+        }
+    });
 
     Object.keys(botConfigs).forEach(botName => {
         const config = botConfigs[botName];
@@ -288,7 +383,7 @@ export default function ChartEngine({ dataset }) {
                         color: getColor(seriesId),
                         lineWidth: 2,
                         priceScaleId: isOscillator ? 'left' : 'right', 
-                        title: `${botName} ${indKey}`,
+                        title: `${indKey}`, 
                         lastValueVisible: true,
                         priceLineVisible: true,
                     });
@@ -304,10 +399,16 @@ export default function ChartEngine({ dataset }) {
                             parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : sig.extra_data;
                         } catch (e) {}
 
-                        if (parsedExtra[indKey] !== undefined && parsedExtra[indKey] !== null) {
-                            const t = safeParseTime(sig.timestamp);
-                            const val = Number(parsedExtra[indKey]); 
-                            if (t && !isNaN(val)) dataMap.set(t, val); 
+                        const actualKey = Object.keys(parsedExtra).find(k => k.toLowerCase() === indKey.toLowerCase());
+
+                        if (actualKey && parsedExtra[actualKey] !== undefined && parsedExtra[actualKey] !== null) {
+                            const rawTime = safeParseTime(sig.timestamp);
+                            const val = Number(parsedExtra[actualKey]); 
+                            
+                            if (rawTime && !isNaN(val)) {
+                                const snappedTime = getSnappedTime(rawTime);
+                                if (snappedTime) dataMap.set(snappedTime, val); 
+                            }
                         }
                     }
                 });
@@ -333,12 +434,13 @@ export default function ChartEngine({ dataset }) {
         });
     });
 
-  }, [signals, botConfigs]);
+  }, [signals, orders, positions, botConfigs, candleTimes]);
 
-  const toggleMarkerConfig = (targetBotName) => {
+  // HIER IS DE ONTBREKENDE FUNCTIE VOOR DE TOGGLES!
+  const toggleBotSetting = (botName, settingKey) => {
       setBotConfigs(prev => {
           const newState = JSON.parse(JSON.stringify(prev));
-          newState[targetBotName].showMarkers = !newState[targetBotName].showMarkers;
+          newState[botName][settingKey] = !newState[botName][settingKey];
           return newState;
       });
   };
@@ -424,7 +526,7 @@ export default function ChartEngine({ dataset }) {
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2b3139]/30 transition-colors"
                       >
                         <div className="text-sm font-bold text-[#eaecef] flex items-center">
-                           <span className={`w-1.5 h-1.5 rounded-full mr-2 ${config.showMarkers ? 'bg-[#2ebd85]' : 'bg-[#848e9c]'}`}></span>
+                           <span className={`w-1.5 h-1.5 rounded-full mr-2 ${config.showSignals || config.showTrades ? 'bg-[#2ebd85]' : 'bg-[#848e9c]'}`}></span>
                            {botName}
                         </div>
                         <svg className={`w-4 h-4 text-[#848e9c] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -434,12 +536,27 @@ export default function ChartEngine({ dataset }) {
 
                       {isExpanded && (
                         <div className="flex flex-col space-y-3 pl-8 pr-4 pb-4 bg-[#0b0e11]/50 border-l-2 border-[#2b3139] ml-4 mt-1">
+                            
                             <label className="flex items-center cursor-pointer mt-2">
                                 <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
-                                checked={config.showMarkers} onChange={() => toggleMarkerConfig(botName)} />
-                                <span className="ml-2 text-xs text-[#eaecef]">Action Signals (Buy/Sell)</span>
+                                checked={config.showTrades} onChange={() => toggleBotSetting(botName, 'showTrades')} />
+                                <span className="ml-2 text-xs text-[#eaecef] font-semibold text-[#0ea5e9]">Executed Trades (T-B / T-S)</span>
                             </label>
-                            
+
+                            <label className="flex items-center cursor-pointer">
+                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
+                                checked={config.showPositions} onChange={() => toggleBotSetting(botName, 'showPositions')} />
+                                <span className="ml-2 text-xs text-[#eaecef]">Active Position Entry Line</span>
+                            </label>
+
+                            <div className="h-px bg-[#2b3139] w-full my-1"></div>
+
+                            <label className="flex items-center cursor-pointer">
+                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
+                                checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} />
+                                <span className="ml-2 text-xs text-[#848e9c] italic">Strategy Thoughts (S-B / S-S)</span>
+                            </label>
+
                             {Object.keys(config.indicators).map(indKey => (
                                 <label key={indKey} className="flex items-center cursor-pointer">
                                     <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]"
@@ -462,7 +579,6 @@ export default function ChartEngine({ dataset }) {
         {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>}
         {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>}
         
-        {/* HUD met dynamische flex-wrap */}
         {hoverData && !loading && !errorMsg && (
           <div className="absolute top-3 left-3 z-10 bg-[#181a20]/80 backdrop-blur-sm border border-[#2b3139] p-2 rounded-sm text-xs font-mono pointer-events-none shadow-lg max-w-[80%] flex flex-wrap gap-y-2">
             <div className="flex space-x-3 items-center flex-wrap gap-y-2">
@@ -472,16 +588,17 @@ export default function ChartEngine({ dataset }) {
               <div className="flex space-x-1"><span className="text-[#848e9c]">C</span><span className={hoverData.close >= hoverData.open ? 'text-[#2ebd85]' : 'text-[#f6465d]'}>{formatNum(hoverData.close)}</span></div>
               <div className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1"><span className="text-[#848e9c]">V</span><span className="text-[#eaecef]">{formatNum(hoverData.value)}</span></div>
               
-              {/* DYNAMISCHE INDICATOREN */}
               {Object.keys(botConfigs).map(botName => {
                   const config = botConfigs[botName];
                   const activeInds = Object.keys(config.indicators).filter(k => config.indicators[k]);
                   if (activeInds.length === 0 || !hoverData.time) return null;
                   
-                  const botDataAtTime = signalMapByTime[hoverData.time]?.[botName]?.extra_data || {};
+                  const botDataAtTime = snappedSignalMap[hoverData.time]?.[botName]?.extra_data || {};
                   
                   return activeInds.map(indKey => {
-                      const val = botDataAtTime[indKey];
+                      const actualKey = Object.keys(botDataAtTime).find(k => k.toLowerCase() === indKey.toLowerCase());
+                      const val = botDataAtTime[actualKey];
+                      
                       if (val === undefined) return null;
                       return (
                           <div key={`${botName}-${indKey}`} className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1 items-center">

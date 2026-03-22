@@ -5,6 +5,8 @@ from backend.core.database import SessionLocal
 from backend.models.bots import BotConfig
 from backend.models.candles import Candle
 from backend.models.signals import Signal
+from backend.models.orders import Order
+from backend.models.positions import Position
 from backend.engine.evaluator import NodeEvaluator
 from backend.core.events import event_bus
 
@@ -44,7 +46,6 @@ class BotManager:
                 active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
                 for bot in active_bots:
                     print(f"🔄 Recovered active bot '{bot.name}' after restart. Triggering historical backfill...")
-                    # Gebruik de thread-safe event loop om de backfill aan te roepen
                     asyncio.run_coroutine_threadsafe(self._backfill_bot(bot.id), asyncio.get_running_loop())
             finally:
                 db.close()
@@ -65,7 +66,7 @@ class BotManager:
                 break
 
     async def _backfill_bot(self, bot_id: int):
-        """Berekent met terugwerkende kracht alle signalen en indicatoren voor historische data."""
+        """Berekent historische signalen. Simuleert trades ALLEEN als backtest_on_start aan staat."""
         def run_backfill():
             db = SessionLocal()
             try:
@@ -74,8 +75,11 @@ class BotManager:
                 
                 symbol = bot.settings.get("symbol")
                 timeframe = bot.settings.get("timeframe")
+                exit_node = bot.settings.get("exit_node")
+                
+                # NIEUW: Kijk in de bot config of we orders/posities moeten simuleren
+                run_backtest = bot.settings.get("backtest_on_start", False)
 
-                # Haal alle historische kaarsen op
                 query = db.query(
                     Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume
                 ).filter(
@@ -85,25 +89,63 @@ class BotManager:
                 df = pd.read_sql(query, db.bind)
                 if df.empty: return
 
-                # Voer de bot wiskunde uit over de hele historie
                 evaluator = NodeEvaluator(bot.settings)
                 evaluator.df = df.copy()
                 evaluator._calculate_indicators() 
 
-                # Kijk welke timestamps we al hebben, zodat we geen dubbele data opslaan
                 existing_timestamps = {s[0] for s in db.query(Signal.timestamp).filter(Signal.bot_name == bot.name).all()}
+                
                 new_signals = []
                 standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
 
-                # Loop door alle historische rijen en sla ze op
+                # --- TRADING SIMULATOR STATE ---
+                open_position = None 
+
                 for index, row in evaluator.df.iterrows():
                     ts = row['timestamp']
-                    if ts in existing_timestamps: continue
-
+                    current_price = float(row['close'])
+                    
                     try:
-                        is_buy = bool(evaluator.resolve_node(evaluator.entry_trigger, index))
-                    except:
-                        is_buy = False
+                        is_buy = bool(evaluator.resolve_node(bot.settings.get("entry_node"), index))
+                    except: is_buy = False
+                    
+                    try:
+                        is_sell = bool(evaluator.resolve_node(exit_node, index)) if exit_node else False
+                    except: is_sell = False
+
+                    # 1. TRADE LOGICA (Wordt alleen uitgevoerd als run_backtest True is)
+                    if run_backtest:
+                        if is_buy and not open_position:
+                            open_position = Position(
+                                bot_name=bot.name, symbol=symbol, mode="backtest", 
+                                status="open", side="long", entry_price=current_price, amount=0.1
+                            )
+                            db.add(open_position)
+                            db.flush() 
+                            
+                            buy_order = Order(
+                                position_id=open_position.id, bot_name=bot.name, mode="backtest", 
+                                symbol=symbol, side="buy", order_type="market", price=current_price, 
+                                amount=0.1, timestamp=ts
+                            )
+                            db.add(buy_order)
+
+                        elif is_sell and open_position:
+                            open_position.status = "closed"
+                            open_position.closed_at = ts
+                            open_position.profit_abs = (current_price - open_position.entry_price) * open_position.amount
+                            open_position.profit_pct = ((current_price - open_position.entry_price) / open_position.entry_price) * 100
+                            
+                            sell_order = Order(
+                                position_id=open_position.id, bot_name=bot.name, mode="backtest", 
+                                symbol=symbol, side="sell", order_type="market", price=current_price, 
+                                amount=0.1, timestamp=ts
+                            )
+                            db.add(sell_order)
+                            open_position = None 
+
+                    # 2. SIGNAAL OPSLAAN VOOR DE GRAFIEK (Dit gebeurt ALTIJD, ongeacht run_backtest)
+                    if ts in existing_timestamps: continue
 
                     indicators = {
                         col: float(row[col]) 
@@ -112,39 +154,37 @@ class BotManager:
                     }
 
                     if indicators:
+                        action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
                         new_signals.append(Signal(
-                            candle_id=int(row['id']),
-                            symbol=symbol,
-                            timestamp=ts,
-                            bot_name=bot.name,
-                            name="STRATEGY_TICK",
-                            action="buy" if is_buy else "neutral",
-                            extra_data=indicators
+                            candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name,
+                            name="STRATEGY_TICK", action=action_str, extra_data=indicators
                         ))
 
                 if new_signals:
                     db.bulk_save_objects(new_signals)
-                    db.commit()
-                    print(f"✅ Backfill Complete: Generated {len(new_signals)} historical signals/ticks for '{bot.name}'")
-                else:
-                    print(f"⚡ Backfill Complete: No new historical data needed for '{bot.name}'")
+                    
+                db.commit()
+                print(f"✅ Historical Sync Complete: '{bot.name}' (Backtest: {'ON' if run_backtest else 'OFF'})")
 
             except Exception as e:
                 print(f"❌ Backfill Error: {e}")
+                db.rollback()
             finally:
                 db.close()
                 
         await asyncio.to_thread(run_backfill)
 
+
     async def _process_bots(self, symbol: str, timeframe: str):
         """Verwerkt ALLEEN de allernieuwste live kaars als deze sluit."""
         def run_logic():
-            db: Session = SessionLocal()
+            db = SessionLocal()
             try:
                 active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
                 matching_bots = [b for b in active_bots if b.settings.get("symbol") == symbol and b.settings.get("timeframe") == timeframe]
                 if not matching_bots: return
 
+                # Haal de laatste ~150 kaarsen op voor de indicator berekeningen
                 query = db.query(
                     Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume
                 ).filter(
@@ -157,11 +197,55 @@ class BotManager:
 
                 for bot in matching_bots:
                     evaluator = NodeEvaluator(bot.settings)
-                    is_buy = evaluator.evaluate(df)
+                    evaluator.df = df.copy()
+                    evaluator._calculate_indicators()
                     
-                    latest_row = evaluator.df.iloc[-1]
+                    latest_index = len(evaluator.df) - 1
+                    latest_row = evaluator.df.iloc[latest_index]
                     latest_time = latest_row['timestamp']
+                    current_price = float(latest_row['close'])
 
+                    # Evalueer Koop / Verkoop
+                    try:
+                        is_buy = bool(evaluator.resolve_node(bot.settings.get("entry_node"), latest_index))
+                    except: is_buy = False
+                    
+                    try:
+                        exit_node = bot.settings.get("exit_node")
+                        is_sell = bool(evaluator.resolve_node(exit_node, latest_index)) if exit_node else False
+                    except: is_sell = False
+
+                    # LIVE TRADING SIMULATOR (Sandbox of Live)
+                    mode = "paper" if bot.is_sandbox else "live"
+                    open_position = db.query(Position).filter(
+                        Position.bot_name == bot.name, Position.status == "open", Position.mode == mode
+                    ).first()
+
+                    if is_buy and not open_position:
+                        open_position = Position(
+                            bot_name=bot.name, symbol=symbol, mode=mode, 
+                            status="open", side="long", entry_price=current_price, amount=0.1
+                        )
+                        db.add(open_position)
+                        db.flush()
+                        db.add(Order(
+                            position_id=open_position.id, bot_name=bot.name, mode=mode, 
+                            symbol=symbol, side="buy", order_type="market", price=current_price, 
+                            amount=0.1, timestamp=latest_time
+                        ))
+
+                    elif is_sell and open_position:
+                        open_position.status = "closed"
+                        open_position.closed_at = latest_time
+                        open_position.profit_abs = (current_price - open_position.entry_price) * open_position.amount
+                        open_position.profit_pct = ((current_price - open_position.entry_price) / open_position.entry_price) * 100
+                        db.add(Order(
+                            position_id=open_position.id, bot_name=bot.name, mode=mode, 
+                            symbol=symbol, side="sell", order_type="market", price=current_price, 
+                            amount=0.1, timestamp=latest_time
+                        ))
+
+                    # Sla het signaal op voor de grafiek (voorkom dubbel opslaan)
                     standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
                     indicators = {
                         col: float(latest_row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(latest_row[col])
@@ -169,17 +253,17 @@ class BotManager:
 
                     existing_signal = db.query(Signal).filter(Signal.bot_name == bot.name, Signal.timestamp == latest_time).first()
                     if not existing_signal and indicators:
-                        action_str = "buy" if is_buy else "neutral"
-                        new_signal = Signal(
+                        action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
+                        db.add(Signal(
                             candle_id=int(latest_row['id']), symbol=symbol, timestamp=latest_time,
                             bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators
-                        )
-                        db.add(new_signal)
+                        ))
                         db.commit()
-                        if is_buy: print(f"🚀 SIGNAL GENERATED: Bot '{bot.name}' says BUY {symbol} @ {latest_time}")
+                        if is_buy or is_sell: print(f"🚀 LIVE SIGNAL: '{bot.name}' says {action_str.upper()} {symbol} @ {latest_time}")
 
             except Exception as e:
-                print(f"❌ Error executing bot strategy: {e}")
+                print(f"❌ Error executing live bot strategy: {e}")
+                db.rollback()
             finally:
                 db.close()
                 

@@ -4,6 +4,7 @@ import DataManager from './components/DataManager';
 import ChartEngine from './components/ChartEngine';
 import Settings from './components/Settings';
 import BotManagerUI from './components/BotManagerUI';
+import TradeManager from './components/TradeManager';
 import { apiClient } from './api/client';
 
 export default function App() {
@@ -12,7 +13,6 @@ export default function App() {
   const [runningBots, setRunningBots] = useState([]);
   const [error, setError] = useState(null);
 
-  // DE 307 REDIRECT FIX: Trailing slash toegevoegd bij /api/bots/
   const fetchRunningBots = async () => {
     try {
       const res = await apiClient.get('/api/bots/');
@@ -60,11 +60,12 @@ export default function App() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         
-        {['manager', 'settings', 'bots'].includes(activeView) && (
+        {['manager', 'settings', 'bots', 'trades'].includes(activeView) && (
           <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-6 shrink-0">
             <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
               {activeView === 'manager' ? 'Market Data Vault' : 
                activeView === 'bots' ? 'Trading Bots' : 
+               activeView === 'trades' ? 'Trade Analytics' :
                'Exchange Configuration'}
             </h2>
           </header>
@@ -89,6 +90,10 @@ export default function App() {
 
           {activeView === 'bots' && (
              <div className="p-6 w-full fade-in"><BotManagerUI setError={setError} /></div>
+          )}
+
+          {activeView === 'trades' && (
+             <div className="p-6 w-full fade-in"><TradeManager setError={setError} /></div>
           )}
 
           {openCharts.map(chart => (

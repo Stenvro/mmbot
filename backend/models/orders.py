@@ -9,8 +9,12 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     position_id = Column(Integer, ForeignKey("positions.id"), nullable=True) 
+    bot_name = Column(String, index=True)               # Toegevoegd voor makkelijk filteren
     
-    exchange_order_id = Column(String, nullable=True)   # Handig om de ID van OKX op te slaan
+    # CRUCIAAL VOOR BELASTING/BOEKHOUDING: 'live', 'paper', of 'backtest'
+    mode = Column(String, default="paper", index=True)
+    
+    exchange_order_id = Column(String, nullable=True)   # OKX Order ID
     symbol = Column(String, index=True)
     side = Column(String)                               # "buy" of "sell"
     order_type = Column(String)                         # "limit" of "market"
@@ -22,6 +26,5 @@ class Order(Base):
     status = Column(String, default="open")             # "open", "filled", "canceled", "rejected"
     
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
 
     position = relationship("Position", back_populates="orders")

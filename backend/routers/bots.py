@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -99,6 +100,30 @@ def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_bot)
     return new_bot
+
+@router.put("/{bot_id}")
+def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depends(get_db)):
+    """Update de instellingen van een bot vanuit de UI"""
+    bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    if "is_sandbox" in bot_data:
+        bot.is_sandbox = bot_data["is_sandbox"]
+        
+    if "settings" in bot_data:
+        current_settings = dict(bot.settings or {})
+        
+        for key, value in bot_data["settings"].items():
+            current_settings[key] = value
+            
+        bot.settings = current_settings
+        
+        flag_modified(bot, "settings")
+
+    db.commit()
+    return {"message": "Bot configuration updated successfully"}
+
 
 @router.delete("/{bot_id}")
 def delete_bot(bot_id: int, db: Session = Depends(get_db)):

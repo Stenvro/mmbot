@@ -97,13 +97,24 @@ def get_data_summary(db: Session = Depends(get_db)):
     return [{"symbol": r.symbol, "timeframe": r.timeframe, "oldest_candle": r.oldest_candle, "newest_candle": r.newest_candle, "count": r.count} for r in summary]
 
 @router.delete("")
-def delete_data(symbol: str, timeframe: Optional[str] = None, db: Session = Depends(get_db)):
+def delete_data(symbol: str, timeframe: Optional[str] = None, before_date: Optional[str] = None, db: Session = Depends(get_db)):
     formatted_symbol = symbol.replace('-', '/').upper()
     query = db.query(Candle).filter(Candle.symbol == formatted_symbol)
-    if timeframe: query = query.filter(Candle.timeframe == timeframe)
+    
+    if timeframe: 
+        query = query.filter(Candle.timeframe == timeframe)
+        
+    if before_date:
+        # Zet de string van de frontend om in een Python datetime object
+        try:
+            date_limit = datetime.fromisoformat(before_date.replace('Z', '+00:00'))
+            query = query.filter(Candle.timestamp < date_limit)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use ISO 8601.")
+            
     deleted_count = query.delete()
     db.commit()
-    return {"message": f"Deleted {deleted_count} candles"}
+    return {"message": f"Deleted {deleted_count} historical candles."}
 
 @router.get("/candles/{symbol}")
 def get_candles(symbol: str, x_timeframe: str = Header(...), db: Session = Depends(get_db)):
