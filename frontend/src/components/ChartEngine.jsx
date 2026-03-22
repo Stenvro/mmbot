@@ -14,6 +14,16 @@ const safeParseTime = (ts) => {
   return isNaN(parsed) ? null : parsed;
 };
 
+// NIEUW: Helper om je timeframe om te rekenen naar seconden
+const getTimeframeSeconds = (tf) => {
+    if (!tf) return 60;
+    const val = parseInt(tf);
+    if (tf.endsWith('m')) return val * 60;
+    if (tf.endsWith('h')) return val * 3600;
+    if (tf.endsWith('d')) return val * 86400;
+    return 60;
+};
+
 const chartColors = ['#fcd535', '#0ea5e9', '#d946ef', '#2ebd85', '#f6465d', '#8b5cf6'];
 const getColor = (str) => {
     let hash = 0;
@@ -87,7 +97,6 @@ export default function ChartEngine({ dataset }) {
          const newConfigs = { ...prev };
          validBots.forEach(bot => {
              if (!newConfigs[bot.name]) {
-                 // SCHONE START: Alleen de Trade Markers (T-B / T-S) staan aan
                  newConfigs[bot.name] = { 
                      showSignals: false, 
                      showBacktestTrades: true, 
@@ -158,6 +167,10 @@ export default function ChartEngine({ dataset }) {
       if (uniqueData.length > 0) {
         lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
         if (!isCrosshairActive.current) setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
+        
+        // FIX: Bepaal direct bij inladen of de data live is (timeframe in seconden + 2 minuut speling)
+        const tfSeconds = getTimeframeSeconds(dataset.timeframe);
+        setIsLiveStreamActive(((Date.now() / 1000) - lastCandleRef.current.time) < (tfSeconds + 120));
       }
     } catch (e) { console.error("Data Load Crash Prevented:", e); }
   };
@@ -184,7 +197,11 @@ export default function ChartEngine({ dataset }) {
             setCandleTimes(prev => prev.includes(latestDbCandle.time) ? prev : [...prev, latestDbCandle.time].sort((a,b) => a-b));
             const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value, time: latestDbCandle.time };
             if (!isCrosshairActive.current) setHoverData(newHoverState);
-            setIsLiveStreamActive((Date.now() / 1000) - latestDbCandle.time < 180);
+            
+            // FIX: Dynamische check (timeframe + 2 minuten speling) in plaats van hardcoded 180s
+            const tfSeconds = getTimeframeSeconds(dataset.timeframe);
+            setIsLiveStreamActive(((Date.now() / 1000) - latestDbCandle.time) < (tfSeconds + 120));
+            
             lastCandleRef.current = newHoverState;
         }
       }
@@ -222,7 +239,10 @@ export default function ChartEngine({ dataset }) {
         volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
         volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-        const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, { headers: { 'x-timeframe': dataset.timeframe } });
+        const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, { 
+            headers: { 'x-timeframe': dataset.timeframe },
+            params: { limit: 500 }
+        });
 
         if (!response.data || response.data.length === 0) {
            setErrorMsg("No data found in local database. Download historical data first.");
@@ -273,7 +293,6 @@ export default function ChartEngine({ dataset }) {
            const readableKey = next[sig.bot_name].nodeMap?.[key] || key;
            if (next[sig.bot_name].indicators[readableKey] === undefined) {
                if (!changed) changed = true;
-               // Standaard FALSE voor een schone weergave
                next[sig.bot_name] = { ...next[sig.bot_name], indicators: { ...next[sig.bot_name].indicators, [readableKey]: false } };
            }
         });
@@ -302,7 +321,6 @@ export default function ChartEngine({ dataset }) {
     });
     return map;
   }, [signals, getSnappedTime, botConfigs]);
-
 
   const snappedTradeMap = useMemo(() => {
     const map = {};
@@ -454,8 +472,6 @@ export default function ChartEngine({ dataset }) {
           return newState;
       });
   };
-
-  const toggleMenuBot = (botName) => setExpandedMenuBot(expandedMenuBot === botName ? null : botName);
 
   const formatChange = (num) => {
     if (num === undefined || num === null) return 'N/A';
