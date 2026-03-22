@@ -35,7 +35,6 @@ export default function ChartEngine({ dataset }) {
   const isCrosshairActive = useRef(false);
   
   const [candleTimes, setCandleTimes] = useState([]);
-
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [hoverData, setHoverData] = useState(null);
@@ -64,7 +63,14 @@ export default function ChartEngine({ dataset }) {
       
       const newConfigs = {};
       validBots.forEach(bot => {
-         newConfigs[bot.name] = { showSignals: false, showTrades: true, showPositions: true, indicators: {} };
+         newConfigs[bot.name] = { 
+             showSignals: false, 
+             showBacktestTrades: true, 
+             showRealTrades: true, 
+             showBacktestPositions: true, 
+             showRealPositions: true, 
+             indicators: {} 
+         };
          if (bot.settings && bot.settings.nodes) {
              Object.values(bot.settings.nodes).forEach(node => {
                  if (node.class === 'indicator') {
@@ -261,17 +267,12 @@ export default function ChartEngine({ dataset }) {
     signals.forEach(sig => {
       const rawTime = safeParseTime(sig.timestamp);
       if (!rawTime) return;
-      
       const snappedTime = getSnappedTime(rawTime);
       if (!snappedTime) return;
-
       if (!map[snappedTime]) map[snappedTime] = {};
       
       let parsedExtra = {};
-      try {
-        parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {});
-      } catch (e) {}
-
+      try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch (e) {}
       map[snappedTime][sig.bot_name] = { ...sig, extra_data: parsedExtra };
     });
     return map;
@@ -306,14 +307,19 @@ export default function ChartEngine({ dataset }) {
     });
 
     orders.forEach(order => {
-        if (botConfigs[order.bot_name]?.showTrades) {
-            const rawTime = safeParseTime(order.timestamp);
-            if (!rawTime) return;
-            const snappedTime = getSnappedTime(rawTime);
-            if (!snappedTime) return;
-            if (!markersByTime[snappedTime]) markersByTime[snappedTime] = [];
-            markersByTime[snappedTime].push({ type: 'trade', data: order });
-        }
+        const isBacktest = order.mode === 'backtest';
+        const config = botConfigs[order.bot_name];
+        
+        if (isBacktest && !config?.showBacktestTrades) return;
+        if (!isBacktest && !config?.showRealTrades) return;
+
+        const rawTime = safeParseTime(order.timestamp);
+        if (!rawTime) return;
+        const snappedTime = getSnappedTime(rawTime);
+        if (!snappedTime) return;
+        
+        if (!markersByTime[snappedTime]) markersByTime[snappedTime] = [];
+        markersByTime[snappedTime].push({ type: 'trade', data: order });
     });
 
     const finalMarkers = [];
@@ -326,52 +332,41 @@ export default function ChartEngine({ dataset }) {
         const buyTrades = itemsAtTime.filter(i => i.type === 'trade' && i.data.side === 'buy');
         const sellTrades = itemsAtTime.filter(i => i.type === 'trade' && i.data.side === 'sell');
         
-        if (buySigs.length > 0) finalMarkers.push({
-            time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp', text: 'S-B'
-        });
-        if (sellSigs.length > 0) finalMarkers.push({
-            time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown', text: 'S-S' 
-        });
-        if (buyTrades.length > 0) finalMarkers.push({
-            time: time, position: 'belowBar', color: '#0ea5e9', shape: 'circle', text: 'T-BUY'
-        });
-        if (sellTrades.length > 0) finalMarkers.push({
-            time: time, position: 'aboveBar', color: '#d946ef', shape: 'circle', text: 'T-SELL'
-        });
+        if (buySigs.length > 0) finalMarkers.push({ time: time, position: 'belowBar', color: '#2ebd85', shape: 'arrowUp', text: 'S-B' });
+        if (sellSigs.length > 0) finalMarkers.push({ time: time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown', text: 'S-S' });
+        
+        if (buyTrades.length > 0) finalMarkers.push({ time: time, position: 'belowBar', color: '#0ea5e9', shape: 'circle', text: 'T-BUY' });
+        if (sellTrades.length > 0) finalMarkers.push({ time: time, position: 'aboveBar', color: '#d946ef', shape: 'circle', text: 'T-SELL' });
     });
 
     finalMarkers.sort((a, b) => a.time - b.time);
-    
-    try { 
-      if (markersPluginRef.current) markersPluginRef.current.setMarkers(finalMarkers); 
-    } catch (e) { console.error("[CRITICAL] Marker Render Crash:", e); }
+    try { if (markersPluginRef.current) markersPluginRef.current.setMarkers(finalMarkers); } catch (e) {}
 
-
-    priceLinesRef.current.forEach(line => {
-        try { candleSeriesRef.current.removePriceLine(line); } catch(e){}
-    });
+    priceLinesRef.current.forEach(line => { try { candleSeriesRef.current.removePriceLine(line); } catch(e){} });
     priceLinesRef.current = [];
 
     positions.forEach(pos => {
-        if (pos.status === 'open' && botConfigs[pos.bot_name]?.showPositions) {
+        if (pos.status === 'open') {
+            const isBacktest = pos.mode === 'backtest';
+            const config = botConfigs[pos.bot_name];
+
+            if (isBacktest && !config?.showBacktestPositions) return;
+            if (!isBacktest && !config?.showRealPositions) return;
+
             const priceLine = {
                 price: pos.entry_price,
-                color: pos.side === 'long' ? '#2ebd85' : '#f6465d',
+                color: isBacktest ? '#848e9c' : (pos.side === 'long' ? '#2ebd85' : '#f6465d'),
                 lineWidth: 2,
                 lineStyle: 2, 
                 axisLabelVisible: true,
-                title: `ENTRY (${pos.bot_name})`,
+                title: `ENTRY (${isBacktest ? 'BT' : 'LIVE'})`,
             };
-            try {
-                const lineObj = candleSeriesRef.current.createPriceLine(priceLine);
-                priceLinesRef.current.push(lineObj);
-            } catch(e) { console.error("Error drawing position line:", e); }
+            try { priceLinesRef.current.push(candleSeriesRef.current.createPriceLine(priceLine)); } catch(e) {}
         }
     });
 
     Object.keys(botConfigs).forEach(botName => {
         const config = botConfigs[botName];
-        
         Object.keys(config.indicators).forEach(indKey => {
             const seriesId = `${botName}_${indKey}`;
             const isActive = config.indicators[indKey];
@@ -380,31 +375,21 @@ export default function ChartEngine({ dataset }) {
                 if (!indicatorSeriesRef.current[seriesId]) {
                     const isOscillator = /RSI|MACD|MFI|CCI|STOCH|ATR/i.test(indKey);
                     indicatorSeriesRef.current[seriesId] = chartRef.current.addSeries(LineSeries, {
-                        color: getColor(seriesId),
-                        lineWidth: 2,
-                        priceScaleId: isOscillator ? 'left' : 'right', 
-                        title: `${indKey}`, 
-                        lastValueVisible: true,
-                        priceLineVisible: true,
+                        color: getColor(seriesId), lineWidth: 2, priceScaleId: isOscillator ? 'left' : 'right', title: `${indKey}`, lastValueVisible: true, priceLineVisible: true,
                     });
                 }
-                
                 const series = indicatorSeriesRef.current[seriesId];
                 const dataMap = new Map(); 
                 
                 signals.forEach(sig => {
                     if (sig.bot_name === botName && sig.extra_data) {
                         let parsedExtra = {};
-                        try {
-                            parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : sig.extra_data;
-                        } catch (e) {}
-
+                        try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : sig.extra_data; } catch (e) {}
                         const actualKey = Object.keys(parsedExtra).find(k => k.toLowerCase() === indKey.toLowerCase());
 
                         if (actualKey && parsedExtra[actualKey] !== undefined && parsedExtra[actualKey] !== null) {
                             const rawTime = safeParseTime(sig.timestamp);
                             const val = Number(parsedExtra[actualKey]); 
-                            
                             if (rawTime && !isNaN(val)) {
                                 const snappedTime = getSnappedTime(rawTime);
                                 if (snappedTime) dataMap.set(snappedTime, val); 
@@ -413,30 +398,18 @@ export default function ChartEngine({ dataset }) {
                     }
                 });
                 
-                const uniqueLineData = Array.from(dataMap.entries())
-                    .map(([t, v]) => ({ time: t, value: v }))
-                    .sort((a, b) => a.time - b.time);
-
+                const uniqueLineData = Array.from(dataMap.entries()).map(([t, v]) => ({ time: t, value: v })).sort((a, b) => a.time - b.time);
                 try {
-                  if (uniqueLineData.length > 0) {
-                      series.setData(uniqueLineData);
-                      series.applyOptions({ visible: true });
-                  } else {
-                      series.applyOptions({ visible: false });
-                  }
-                } catch(e) { console.error(`[CRITICAL] Line Render Crash for ${seriesId}:`, e); }
-
+                  if (uniqueLineData.length > 0) { series.setData(uniqueLineData); series.applyOptions({ visible: true }); } 
+                  else { series.applyOptions({ visible: false }); }
+                } catch(e) {}
             } else {
-                if (indicatorSeriesRef.current[seriesId]) {
-                    indicatorSeriesRef.current[seriesId].applyOptions({ visible: false });
-                }
+                if (indicatorSeriesRef.current[seriesId]) indicatorSeriesRef.current[seriesId].applyOptions({ visible: false });
             }
         });
     });
-
   }, [signals, orders, positions, botConfigs, candleTimes]);
 
-  // HIER IS DE ONTBREKENDE FUNCTIE VOOR DE TOGGLES!
   const toggleBotSetting = (botName, settingKey) => {
       setBotConfigs(prev => {
           const newState = JSON.parse(JSON.stringify(prev));
@@ -465,6 +438,7 @@ export default function ChartEngine({ dataset }) {
   return (
     <div className="flex flex-col w-full h-full bg-[#0b0e11] rounded overflow-hidden">
       
+      {/* HEADER HUD MET 24H STATS */}
       <div className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center justify-between px-4 shrink-0 relative z-30">
         <div className="flex items-center space-x-6">
           <div className="flex flex-col">
@@ -526,7 +500,7 @@ export default function ChartEngine({ dataset }) {
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2b3139]/30 transition-colors"
                       >
                         <div className="text-sm font-bold text-[#eaecef] flex items-center">
-                           <span className={`w-1.5 h-1.5 rounded-full mr-2 ${config.showSignals || config.showTrades ? 'bg-[#2ebd85]' : 'bg-[#848e9c]'}`}></span>
+                           <span className="w-1.5 h-1.5 rounded-full mr-2 bg-[#2ebd85]"></span>
                            {botName}
                         </div>
                         <svg className={`w-4 h-4 text-[#848e9c] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -535,32 +509,45 @@ export default function ChartEngine({ dataset }) {
                       </button>
 
                       {isExpanded && (
-                        <div className="flex flex-col space-y-3 pl-8 pr-4 pb-4 bg-[#0b0e11]/50 border-l-2 border-[#2b3139] ml-4 mt-1">
+                        <div className="flex flex-col space-y-4 pl-8 pr-4 pb-4 bg-[#0b0e11]/50 border-l-2 border-[#2b3139] ml-4 mt-1">
                             
-                            <label className="flex items-center cursor-pointer mt-2">
-                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
-                                checked={config.showTrades} onChange={() => toggleBotSetting(botName, 'showTrades')} />
-                                <span className="ml-2 text-xs text-[#eaecef] font-semibold text-[#0ea5e9]">Executed Trades (T-B / T-S)</span>
-                            </label>
+                            {/* Real Trades (Paper/Live) */}
+                            <div className="flex flex-col space-y-2 mt-2">
+                                <span className="text-[10px] font-bold text-[#0ea5e9] uppercase tracking-wider">LIVE & PAPER MODE</span>
+                                <label className="flex items-center cursor-pointer">
+                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealTrades} onChange={() => toggleBotSetting(botName, 'showRealTrades')} />
+                                    <span className="ml-2 text-xs text-[#eaecef]">Real Trades (T-B / T-S)</span>
+                                </label>
+                                <label className="flex items-center cursor-pointer">
+                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealPositions} onChange={() => toggleBotSetting(botName, 'showRealPositions')} />
+                                    <span className="ml-2 text-xs text-[#eaecef]">Real Position Line</span>
+                                </label>
+                            </div>
 
-                            <label className="flex items-center cursor-pointer">
-                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
-                                checked={config.showPositions} onChange={() => toggleBotSetting(botName, 'showPositions')} />
-                                <span className="ml-2 text-xs text-[#eaecef]">Active Position Entry Line</span>
-                            </label>
+                            {/* Backtest Trades */}
+                            <div className="flex flex-col space-y-2">
+                                <span className="text-[10px] font-bold text-[#fcd535] uppercase tracking-wider">BACKTEST MODE</span>
+                                <label className="flex items-center cursor-pointer">
+                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestTrades} onChange={() => toggleBotSetting(botName, 'showBacktestTrades')} />
+                                    <span className="ml-2 text-xs text-[#848e9c]">Historical Trades (T-B / T-S)</span>
+                                </label>
+                                <label className="flex items-center cursor-pointer">
+                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestPositions} onChange={() => toggleBotSetting(botName, 'showBacktestPositions')} />
+                                    <span className="ml-2 text-xs text-[#848e9c]">Historical Position Line</span>
+                                </label>
+                            </div>
 
                             <div className="h-px bg-[#2b3139] w-full my-1"></div>
 
+                            {/* Signals & Indicators */}
                             <label className="flex items-center cursor-pointer">
-                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]"
-                                checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} />
-                                <span className="ml-2 text-xs text-[#848e9c] italic">Strategy Thoughts (S-B / S-S)</span>
+                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} />
+                                <span className="ml-2 text-xs text-[#eaecef] italic">Engine Thoughts (S-B / S-S)</span>
                             </label>
 
                             {Object.keys(config.indicators).map(indKey => (
                                 <label key={indKey} className="flex items-center cursor-pointer">
-                                    <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]"
-                                    checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} />
+                                    <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} />
                                     <span className="ml-2 text-xs text-[#eaecef]">Draw Line: {indKey}</span>
                                 </label>
                             ))}
@@ -579,6 +566,7 @@ export default function ChartEngine({ dataset }) {
         {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>}
         {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>}
         
+        {/* ZWEVENDE OHLC + INDICATOR HUD */}
         {hoverData && !loading && !errorMsg && (
           <div className="absolute top-3 left-3 z-10 bg-[#181a20]/80 backdrop-blur-sm border border-[#2b3139] p-2 rounded-sm text-xs font-mono pointer-events-none shadow-lg max-w-[80%] flex flex-wrap gap-y-2">
             <div className="flex space-x-3 items-center flex-wrap gap-y-2">

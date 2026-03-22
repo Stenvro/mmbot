@@ -5,6 +5,7 @@ import ChartEngine from './components/ChartEngine';
 import Settings from './components/Settings';
 import BotManagerUI from './components/BotManagerUI';
 import TradeManager from './components/TradeManager';
+import BotBuilder from './components/Builder/BotBuilder';
 import { apiClient } from './api/client';
 
 export default function App() {
@@ -12,6 +13,10 @@ export default function App() {
   const [openCharts, setOpenCharts] = useState([]);
   const [runningBots, setRunningBots] = useState([]);
   const [error, setError] = useState(null);
+  
+  // State voor de Visual Builder Overlay
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [editingBot, setEditingBot] = useState(null);
 
   const fetchRunningBots = async () => {
     try {
@@ -26,7 +31,20 @@ export default function App() {
   useEffect(() => {
     fetchRunningBots();
     const botInterval = setInterval(fetchRunningBots, 5000);
-    return () => clearInterval(botInterval);
+    
+    // Luister naar de knop in BotManagerUI om de builder te openen
+    const handleOpenBuilder = (e) => {
+        // e.detail bevat de bot data als we op 'Edit Bot' klikken, anders is het null (Create New)
+        setEditingBot(e.detail || null); 
+        setShowBuilder(true);
+    };
+    
+    window.addEventListener('open-builder', handleOpenBuilder);
+
+    return () => {
+      clearInterval(botInterval);
+      window.removeEventListener('open-builder', handleOpenBuilder);
+    };
   }, []);
 
   const handleOpenChart = (dataset) => {
@@ -47,7 +65,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30">
+    <div className="flex h-screen bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30 relative">
       
       <Sidebar 
         activeView={activeView} 
@@ -64,7 +82,7 @@ export default function App() {
           <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-6 shrink-0">
             <h2 className="text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
               {activeView === 'manager' ? 'Market Data Vault' : 
-               activeView === 'bots' ? 'Trading Bots' : 
+               activeView === 'bots' ? 'Trading Algorithms' : 
                activeView === 'trades' ? 'Trade Analytics' :
                'Exchange Configuration'}
             </h2>
@@ -72,7 +90,7 @@ export default function App() {
         )}
 
         {error && (
-          <div className="m-4 p-3 bg-[#f6465d]/10 border border-[#f6465d]/50 text-[#f6465d] text-sm rounded shadow-sm flex justify-between items-center shrink-0">
+          <div className="m-4 p-3 bg-[#f6465d]/10 border border-[#f6465d]/50 text-[#f6465d] text-sm rounded shadow-sm flex justify-between items-center shrink-0 z-50">
             <span>{error}</span>
             <button className="text-[#f6465d] hover:text-white" onClick={() => setError(null)}>✕</button>
           </div>
@@ -106,6 +124,14 @@ export default function App() {
           
         </main>
       </div>
+
+      {/* FULLSCREEN BUILDER OVERLAY */}
+      {showBuilder && (
+        <div className="absolute inset-0 z-[100] bg-[#0b0e11]">
+           <BotBuilder closeBuilder={() => setShowBuilder(false)} editingBot={editingBot} />
+        </div>
+      )}
+
     </div>
   );
 }
