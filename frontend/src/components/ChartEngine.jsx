@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { apiClient } from '../api/client';
 
@@ -19,6 +19,16 @@ const getColor = (str) => {
     let hash = 0;
     for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
     return chartColors[Math.abs(hash) % chartColors.length];
+};
+
+const formatNum = (num, decimals = 2) => {
+    if (num === undefined || num === null || isNaN(Number(num))) return '0.00';
+    return Number(num).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+
+const formatCrypto = (val) => {
+    if (!val) return "0.00";
+    return Number(val).toFixed(6).replace(/\.?0+$/, ''); 
 };
 
 export default function ChartEngine({ dataset }) {
@@ -49,6 +59,18 @@ export default function ChartEngine({ dataset }) {
   const [expandedMenuBot, setExpandedMenuBot] = useState(null); 
   const [botConfigs, setBotConfigs] = useState({});
 
+  const getSnappedTime = useCallback((rawTime) => {
+      if (!candleTimes || candleTimes.length === 0) return null;
+      let closest = candleTimes[0];
+      let minDiff = Math.abs(rawTime - closest);
+      for (let i = 1; i < candleTimes.length; i++) {
+          const diff = Math.abs(rawTime - candleTimes[i]);
+          if (diff < minDiff) { minDiff = diff; closest = candleTimes[i]; }
+          if (diff === 0) break;
+      }
+      return minDiff <= 3600 ? closest : null;
+  }, [candleTimes]);
+
   const fetchMarketInfo = async () => {
     try {
       const response = await apiClient.get(`/api/data/market-info/${dataset.symbol.replace('/', '-')}`);
@@ -61,27 +83,34 @@ export default function ChartEngine({ dataset }) {
       const botRes = await apiClient.get('/api/bots/');
       const validBots = botRes.data.filter(b => b.settings?.symbol === dataset.symbol && b.settings?.timeframe === dataset.timeframe);
       
-      const newConfigs = {};
-      validBots.forEach(bot => {
-         newConfigs[bot.name] = { 
-             showSignals: false, 
-             showBacktestTrades: true, 
-             showRealTrades: true, 
-             showBacktestPositions: true, 
-             showRealPositions: true, 
-             indicators: {} 
-         };
-         if (bot.settings && bot.settings.nodes) {
-             Object.values(bot.settings.nodes).forEach(node => {
-                 if (node.class === 'indicator') {
-                     const suffix = node.params && node.params.length > 0 ? `_${node.params.join('_')}` : '';
-                     const indName = `${node.method.toUpperCase()}${suffix}`;
-                     newConfigs[bot.name].indicators[indName] = false; 
-                 }
-             });
-         }
+      setBotConfigs(prev => {
+         const newConfigs = { ...prev };
+         validBots.forEach(bot => {
+             if (!newConfigs[bot.name]) {
+                 // SCHONE START: Alleen de Trade Markers (T-B / T-S) staan aan
+                 newConfigs[bot.name] = { 
+                     showSignals: false, 
+                     showBacktestTrades: true, 
+                     showRealTrades: true, 
+                     showBacktestPositions: false, 
+                     showRealPositions: false, 
+                     indicators: {}, 
+                     nodeMap: {} 
+                 };
+             }
+             newConfigs[bot.name].nodeMap = {};
+             if (bot.settings && bot.settings.nodes) {
+                 Object.entries(bot.settings.nodes).forEach(([nodeId, node]) => {
+                     if (node.class === 'indicator') {
+                         const suffix = node.params && node.params.length > 0 ? `_${node.params.join('_')}` : '';
+                         const indName = `${node.method.toUpperCase()}${suffix}`;
+                         newConfigs[bot.name].nodeMap[nodeId] = indName; 
+                     }
+                 });
+             }
+         });
+         return newConfigs;
       });
-      setBotConfigs(newConfigs);
     } catch (e) { console.error("Error setting up configs", e); }
   };
 
@@ -128,9 +157,7 @@ export default function ChartEngine({ dataset }) {
       
       if (uniqueData.length > 0) {
         lastCandleRef.current = { ...uniqueData[uniqueData.length - 1], value: volumeData[volumeData.length - 1].value };
-        if (!isCrosshairActive.current) {
-            setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
-        }
+        if (!isCrosshairActive.current) setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
       }
     } catch (e) { console.error("Data Load Crash Prevented:", e); }
   };
@@ -151,23 +178,13 @@ export default function ChartEngine({ dataset }) {
         if (!lastCandleRef.current || latestDbCandle.time >= lastCandleRef.current.time) {
             candleSeriesRef.current.update(latestDbCandle);
             volumeSeriesRef.current.update({
-                time: latestDbCandle.time, 
-                value: latestDbCandle.volume || latestDbCandle.value,
+                time: latestDbCandle.time, value: latestDbCandle.volume || latestDbCandle.value,
                 color: latestDbCandle.close >= latestDbCandle.open ? '#2ebd8580' : '#f6465d80'
             });
-            
-            setCandleTimes(prev => {
-                if (!prev.includes(latestDbCandle.time)) {
-                    return [...prev, latestDbCandle.time].sort((a,b) => a-b);
-                }
-                return prev;
-            });
-
+            setCandleTimes(prev => prev.includes(latestDbCandle.time) ? prev : [...prev, latestDbCandle.time].sort((a,b) => a-b));
             const newHoverState = { ...latestDbCandle, value: latestDbCandle.volume || latestDbCandle.value, time: latestDbCandle.time };
             if (!isCrosshairActive.current) setHoverData(newHoverState);
-            
-            const isFresh = (Date.now() / 1000) - latestDbCandle.time < 180;
-            setIsLiveStreamActive(isFresh);
+            setIsLiveStreamActive((Date.now() / 1000) - latestDbCandle.time < 180);
             lastCandleRef.current = newHoverState;
         }
       }
@@ -185,13 +202,12 @@ export default function ChartEngine({ dataset }) {
       try {
         setLoading(true);
         setErrorMsg(null);
-        
         const chart = createChart(chartContainerRef.current, {
           layout: { background: { type: 'solid', color: '#0b0e11' }, textColor: '#848e9c' },
           grid: { vertLines: { color: '#1f2329' }, horzLines: { color: '#1f2329' } },
           crosshair: { mode: 0 }, 
-          rightPriceScale: { borderColor: '#2b3139' },
-          leftPriceScale: { visible: true, borderColor: '#2b3139' },
+          rightPriceScale: { borderColor: '#2b3139', autoScale: true },
+          leftPriceScale: { visible: true, borderColor: '#2b3139', autoScale: true }, 
           timeScale: { borderColor: '#2b3139', timeVisible: true }, 
           autoSize: true, 
         });
@@ -206,9 +222,7 @@ export default function ChartEngine({ dataset }) {
         volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
         volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-        const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
-          headers: { 'x-timeframe': dataset.timeframe }
-        });
+        const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, { headers: { 'x-timeframe': dataset.timeframe } });
 
         if (!response.data || response.data.length === 0) {
            setErrorMsg("No data found in local database. Download historical data first.");
@@ -227,9 +241,7 @@ export default function ChartEngine({ dataset }) {
           isCrosshairActive.current = true;
           const dCandle = param.seriesData.get(candleSeriesRef.current);
           const dVol = param.seriesData.get(volumeSeriesRef.current);
-          if (dCandle) {
-             setHoverData({ ...dCandle, value: dVol ? dVol.value : 0, time: param.time });
-          }
+          if (dCandle) setHoverData({ ...dCandle, value: dVol ? dVol.value : 0, time: param.time });
         });
       } catch (error) {
         setErrorMsg(`API Error: ${error.message}`);
@@ -248,53 +260,75 @@ export default function ChartEngine({ dataset }) {
     };
   }, [dataset.symbol, dataset.timeframe]);
 
+  useEffect(() => {
+    if (signals.length === 0) return;
+    setBotConfigs(prev => {
+      let changed = false;
+      const next = { ...prev };
+      signals.forEach(sig => {
+        if (!next[sig.bot_name]) return;
+        let parsedExtra = {};
+        try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch(e){}
+        Object.keys(parsedExtra).forEach(key => {
+           const readableKey = next[sig.bot_name].nodeMap?.[key] || key;
+           if (next[sig.bot_name].indicators[readableKey] === undefined) {
+               if (!changed) changed = true;
+               // Standaard FALSE voor een schone weergave
+               next[sig.bot_name] = { ...next[sig.bot_name], indicators: { ...next[sig.bot_name].indicators, [readableKey]: false } };
+           }
+        });
+      });
+      return changed ? next : prev;
+    });
+  }, [signals]);
 
   const snappedSignalMap = useMemo(() => {
     const map = {};
-    if (!candleTimes || candleTimes.length === 0) return map;
-
-    const getSnappedTime = (rawTime) => {
-        let closest = candleTimes[0];
-        let minDiff = Math.abs(rawTime - closest);
-        for (let i = 1; i < candleTimes.length; i++) {
-            const diff = Math.abs(rawTime - candleTimes[i]);
-            if (diff < minDiff) { minDiff = diff; closest = candleTimes[i]; }
-            if (diff === 0) break;
-        }
-        return minDiff <= 3600 ? closest : null;
-    };
-
     signals.forEach(sig => {
       const rawTime = safeParseTime(sig.timestamp);
       if (!rawTime) return;
       const snappedTime = getSnappedTime(rawTime);
       if (!snappedTime) return;
       if (!map[snappedTime]) map[snappedTime] = {};
-      
       let parsedExtra = {};
       try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch (e) {}
-      map[snappedTime][sig.bot_name] = { ...sig, extra_data: parsedExtra };
+      const config = botConfigs[sig.bot_name];
+      const mappedExtra = {};
+      Object.keys(parsedExtra).forEach(k => {
+          const readableKey = (config && config.nodeMap && config.nodeMap[k]) ? config.nodeMap[k] : k;
+          mappedExtra[readableKey] = parsedExtra[k];
+      });
+      map[snappedTime][sig.bot_name] = { ...sig, extra_data: mappedExtra };
     });
     return map;
-  }, [signals, candleTimes]);
+  }, [signals, getSnappedTime, botConfigs]);
 
+
+  const snappedTradeMap = useMemo(() => {
+    const map = {};
+    orders.forEach(order => {
+        const rawTime = safeParseTime(order.timestamp);
+        if (!rawTime) return;
+        const snappedTime = getSnappedTime(rawTime);
+        if (!snappedTime) return;
+        
+        const config = botConfigs[order.bot_name];
+        const isBacktest = order.mode === 'backtest';
+        if (isBacktest && !config?.showBacktestTrades) return;
+        if (!isBacktest && !config?.showRealTrades) return;
+
+        const relatedPosition = positions.find(p => p.id === order.position_id);
+
+        if (!map[snappedTime]) map[snappedTime] = [];
+        map[snappedTime].push({ ...order, position: relatedPosition });
+    });
+    return map;
+  }, [orders, positions, getSnappedTime, botConfigs]);
 
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current || candleTimes.length === 0) return;
     
-    const getSnappedTime = (rawTime) => {
-        let closest = candleTimes[0];
-        let minDiff = Math.abs(rawTime - closest);
-        for (let i = 1; i < candleTimes.length; i++) {
-            const diff = Math.abs(rawTime - candleTimes[i]);
-            if (diff < minDiff) { minDiff = diff; closest = candleTimes[i]; }
-            if (diff === 0) break; 
-        }
-        return minDiff <= 3600 ? closest : null; 
-    };
-
     const markersByTime = {};
-    
     signals.forEach(sig => {
       if (botConfigs[sig.bot_name]?.showSignals && (sig.action === 'buy' || sig.action === 'sell')) {
         const rawTime = safeParseTime(sig.timestamp);
@@ -306,20 +340,10 @@ export default function ChartEngine({ dataset }) {
       }
     });
 
-    orders.forEach(order => {
-        const isBacktest = order.mode === 'backtest';
-        const config = botConfigs[order.bot_name];
-        
-        if (isBacktest && !config?.showBacktestTrades) return;
-        if (!isBacktest && !config?.showRealTrades) return;
-
-        const rawTime = safeParseTime(order.timestamp);
-        if (!rawTime) return;
-        const snappedTime = getSnappedTime(rawTime);
-        if (!snappedTime) return;
-        
+    Object.entries(snappedTradeMap).forEach(([timeStr, tradesAtTime]) => {
+        const snappedTime = parseInt(timeStr);
         if (!markersByTime[snappedTime]) markersByTime[snappedTime] = [];
-        markersByTime[snappedTime].push({ type: 'trade', data: order });
+        tradesAtTime.forEach(trade => markersByTime[snappedTime].push({ type: 'trade', data: trade }));
     });
 
     const finalMarkers = [];
@@ -373,7 +397,7 @@ export default function ChartEngine({ dataset }) {
 
             if (isActive) {
                 if (!indicatorSeriesRef.current[seriesId]) {
-                    const isOscillator = /RSI|MACD|MFI|CCI|STOCH|ATR/i.test(indKey);
+                    const isOscillator = /RSI|MACD|MFI|CCI|STOCH|ATR|ADX/i.test(indKey);
                     indicatorSeriesRef.current[seriesId] = chartRef.current.addSeries(LineSeries, {
                         color: getColor(seriesId), lineWidth: 2, priceScaleId: isOscillator ? 'left' : 'right', title: `${indKey}`, lastValueVisible: true, priceLineVisible: true,
                     });
@@ -385,14 +409,19 @@ export default function ChartEngine({ dataset }) {
                     if (sig.bot_name === botName && sig.extra_data) {
                         let parsedExtra = {};
                         try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : sig.extra_data; } catch (e) {}
-                        const actualKey = Object.keys(parsedExtra).find(k => k.toLowerCase() === indKey.toLowerCase());
+                        
+                        const mappedExtra = {};
+                        Object.keys(parsedExtra).forEach(k => {
+                            const readableKey = (config && config.nodeMap && config.nodeMap[k]) ? config.nodeMap[k] : k;
+                            mappedExtra[readableKey] = parsedExtra[k];
+                        });
 
-                        if (actualKey && parsedExtra[actualKey] !== undefined && parsedExtra[actualKey] !== null) {
+                        const val = mappedExtra[indKey]; 
+                        if (val !== undefined && val !== null) {
                             const rawTime = safeParseTime(sig.timestamp);
-                            const val = Number(parsedExtra[actualKey]); 
-                            if (rawTime && !isNaN(val)) {
+                            if (rawTime && !isNaN(Number(val))) {
                                 const snappedTime = getSnappedTime(rawTime);
-                                if (snappedTime) dataMap.set(snappedTime, val); 
+                                if (snappedTime) dataMap.set(snappedTime, Number(val)); 
                             }
                         }
                     }
@@ -408,7 +437,7 @@ export default function ChartEngine({ dataset }) {
             }
         });
     });
-  }, [signals, orders, positions, botConfigs, candleTimes]);
+  }, [signals, orders, positions, botConfigs, getSnappedTime, snappedTradeMap]);
 
   const toggleBotSetting = (botName, settingKey) => {
       setBotConfigs(prev => {
@@ -428,7 +457,6 @@ export default function ChartEngine({ dataset }) {
 
   const toggleMenuBot = (botName) => setExpandedMenuBot(expandedMenuBot === botName ? null : botName);
 
-  const formatNum = (num) => num !== undefined && num !== null ? num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A';
   const formatChange = (num) => {
     if (num === undefined || num === null) return 'N/A';
     const val = parseFloat(num);
@@ -438,7 +466,6 @@ export default function ChartEngine({ dataset }) {
   return (
     <div className="flex flex-col w-full h-full bg-[#0b0e11] rounded overflow-hidden">
       
-      {/* HEADER HUD MET 24H STATS */}
       <div className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center justify-between px-4 shrink-0 relative z-30">
         <div className="flex items-center space-x-6">
           <div className="flex flex-col">
@@ -446,16 +473,14 @@ export default function ChartEngine({ dataset }) {
               <span className="text-white font-bold tracking-wider">{dataset.symbol}</span>
               <span className="bg-[#2b3139] text-[#eaecef] text-[10px] px-1.5 py-0.5 rounded uppercase">{dataset.timeframe}</span>
             </div>
-            {marketInfo && <span className={`text-xs font-mono font-medium mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{marketInfo.last}</span>}
+            {marketInfo && <span className={`text-xs font-mono font-medium mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{formatNum(marketInfo.last)}</span>}
           </div>
 
           {marketInfo && (
             <>
               <div className="hidden md:flex flex-col border-l border-[#2b3139] pl-6">
                 <span className="text-[#848e9c] text-[10px] uppercase">24h Change</span>
-                <span className={`text-xs font-mono mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
-                  {formatChange(marketInfo.change_24h)}
-                </span>
+                <span className={`text-xs font-mono mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{formatChange(marketInfo.change_24h)}</span>
               </div>
               <div className="hidden md:flex flex-col border-l border-[#2b3139] pl-6">
                 <span className="text-[#848e9c] text-[10px] uppercase">24h High</span>
@@ -495,61 +520,29 @@ export default function ChartEngine({ dataset }) {
 
                   return (
                     <div key={botName} className="border-b border-[#2b3139]/50 last:border-0 transition-colors">
-                      <button 
-                        onClick={() => toggleMenuBot(botName)}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2b3139]/30 transition-colors"
-                      >
+                      <button onClick={() => toggleMenuBot(botName)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2b3139]/30 transition-colors">
                         <div className="text-sm font-bold text-[#eaecef] flex items-center">
-                           <span className="w-1.5 h-1.5 rounded-full mr-2 bg-[#2ebd85]"></span>
-                           {botName}
+                           <span className="w-1.5 h-1.5 rounded-full mr-2 bg-[#2ebd85]"></span>{botName}
                         </div>
-                        <svg className={`w-4 h-4 text-[#848e9c] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
+                        <svg className={`w-4 h-4 text-[#848e9c] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                       </button>
 
                       {isExpanded && (
                         <div className="flex flex-col space-y-4 pl-8 pr-4 pb-4 bg-[#0b0e11]/50 border-l-2 border-[#2b3139] ml-4 mt-1">
-                            
-                            {/* Real Trades (Paper/Live) */}
                             <div className="flex flex-col space-y-2 mt-2">
                                 <span className="text-[10px] font-bold text-[#0ea5e9] uppercase tracking-wider">LIVE & PAPER MODE</span>
-                                <label className="flex items-center cursor-pointer">
-                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealTrades} onChange={() => toggleBotSetting(botName, 'showRealTrades')} />
-                                    <span className="ml-2 text-xs text-[#eaecef]">Real Trades (T-B / T-S)</span>
-                                </label>
-                                <label className="flex items-center cursor-pointer">
-                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealPositions} onChange={() => toggleBotSetting(botName, 'showRealPositions')} />
-                                    <span className="ml-2 text-xs text-[#eaecef]">Real Position Line</span>
-                                </label>
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealTrades} onChange={() => toggleBotSetting(botName, 'showRealTrades')} /><span className="ml-2 text-xs text-[#eaecef]">Real Trades (T-B / T-S)</span></label>
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealPositions} onChange={() => toggleBotSetting(botName, 'showRealPositions')} /><span className="ml-2 text-xs text-[#eaecef]">Real Position Line</span></label>
                             </div>
-
-                            {/* Backtest Trades */}
                             <div className="flex flex-col space-y-2">
                                 <span className="text-[10px] font-bold text-[#fcd535] uppercase tracking-wider">BACKTEST MODE</span>
-                                <label className="flex items-center cursor-pointer">
-                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestTrades} onChange={() => toggleBotSetting(botName, 'showBacktestTrades')} />
-                                    <span className="ml-2 text-xs text-[#848e9c]">Historical Trades (T-B / T-S)</span>
-                                </label>
-                                <label className="flex items-center cursor-pointer">
-                                    <input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestPositions} onChange={() => toggleBotSetting(botName, 'showBacktestPositions')} />
-                                    <span className="ml-2 text-xs text-[#848e9c]">Historical Position Line</span>
-                                </label>
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestTrades} onChange={() => toggleBotSetting(botName, 'showBacktestTrades')} /><span className="ml-2 text-xs text-[#848e9c]">Historical Trades (T-B / T-S)</span></label>
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestPositions} onChange={() => toggleBotSetting(botName, 'showBacktestPositions')} /><span className="ml-2 text-xs text-[#848e9c]">Historical Position Line</span></label>
                             </div>
-
                             <div className="h-px bg-[#2b3139] w-full my-1"></div>
-
-                            {/* Signals & Indicators */}
-                            <label className="flex items-center cursor-pointer">
-                                <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} />
-                                <span className="ml-2 text-xs text-[#eaecef] italic">Engine Thoughts (S-B / S-S)</span>
-                            </label>
-
+                            <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} /><span className="ml-2 text-xs text-[#eaecef] italic">Engine Thoughts (S-B / S-S)</span></label>
                             {Object.keys(config.indicators).map(indKey => (
-                                <label key={indKey} className="flex items-center cursor-pointer">
-                                    <input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} />
-                                    <span className="ml-2 text-xs text-[#eaecef]">Draw Line: {indKey}</span>
-                                </label>
+                                <label key={indKey} className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} /><span className="ml-2 text-xs text-[#eaecef]">Draw Line: {indKey}</span></label>
                             ))}
                         </div>
                       )}
@@ -566,7 +559,6 @@ export default function ChartEngine({ dataset }) {
         {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>}
         {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>}
         
-        {/* ZWEVENDE OHLC + INDICATOR HUD */}
         {hoverData && !loading && !errorMsg && (
           <div className="absolute top-3 left-3 z-10 bg-[#181a20]/80 backdrop-blur-sm border border-[#2b3139] p-2 rounded-sm text-xs font-mono pointer-events-none shadow-lg max-w-[80%] flex flex-wrap gap-y-2">
             <div className="flex space-x-3 items-center flex-wrap gap-y-2">
@@ -580,23 +572,83 @@ export default function ChartEngine({ dataset }) {
                   const config = botConfigs[botName];
                   const activeInds = Object.keys(config.indicators).filter(k => config.indicators[k]);
                   if (activeInds.length === 0 || !hoverData.time) return null;
-                  
                   const botDataAtTime = snappedSignalMap[hoverData.time]?.[botName]?.extra_data || {};
                   
                   return activeInds.map(indKey => {
-                      const actualKey = Object.keys(botDataAtTime).find(k => k.toLowerCase() === indKey.toLowerCase());
-                      const val = botDataAtTime[actualKey];
-                      
+                      const val = botDataAtTime[indKey];
                       if (val === undefined) return null;
                       return (
                           <div key={`${botName}-${indKey}`} className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1 items-center">
-                              <span className="text-[#848e9c] text-[10px] uppercase">{indKey}</span>
-                              <span className="text-[#fcd535]">{formatNum(val)}</span>
+                              <span className="text-[#848e9c] text-[10px] uppercase">{indKey}</span><span className="text-[#fcd535]">{formatNum(val)}</span>
                           </div>
                       );
                   });
               })}
             </div>
+          </div>
+        )}
+
+        {hoverData && snappedTradeMap[hoverData.time] && snappedTradeMap[hoverData.time].length > 0 && (
+          <div className="absolute top-14 left-3 z-20 flex flex-col space-y-2 pointer-events-none">
+            {snappedTradeMap[hoverData.time].map((trade, idx) => {
+                const totalValue = trade.price * trade.amount;
+                const isWin = trade.position ? trade.price >= trade.position.entry_price : true;
+                const pnlPct = trade.position ? (((trade.price - trade.position.entry_price) / trade.position.entry_price) * 100).toFixed(2) : "0.00";
+                const pnlAbs = trade.position ? ((trade.price - trade.position.entry_price) * trade.amount).toFixed(2) : "0.00";
+
+                return (
+                    <div key={idx} className={`bg-[#181a20]/95 backdrop-blur-md border p-3 rounded shadow-2xl flex flex-col min-w-[260px] ${trade.side === 'buy' ? 'border-[#0ea5e9]' : 'border-[#d946ef]'}`}>
+                        <div className="flex justify-between items-center mb-2 pb-2 border-b border-[#2b3139]">
+                            <span className={`text-xs font-bold uppercase tracking-wider ${trade.side === 'buy' ? 'text-[#0ea5e9]' : 'text-[#d946ef]'}`}>
+                                {trade.side === 'buy' ? 'ENTRY EXECUTION' : 'EXIT EXECUTION'}
+                            </span>
+                            <span className="bg-[#2b3139] text-[#eaecef] text-[8px] px-1.5 py-0.5 rounded uppercase font-bold">{trade.mode}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                            <div className="flex flex-col">
+                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Execution Price</span>
+                                <span className="text-xs text-[#eaecef] font-mono">${formatNum(trade.price)}</span>
+                            </div>
+                            <div className="flex flex-col text-right">
+                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Filled Size</span>
+                                <span className="text-xs text-[#eaecef] font-mono">{formatCrypto(trade.amount)}</span>
+                            </div>
+                            
+                            <div className="flex flex-col">
+                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Total Value</span>
+                                <span className="text-xs text-[#eaecef] font-mono">${formatNum(totalValue)}</span>
+                            </div>
+                            <div className="flex flex-col text-right">
+                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Order Type</span>
+                                <span className="text-xs text-[#eaecef] uppercase">{trade.order_type || 'Market'}</span>
+                            </div>
+                            
+                            {trade.side === 'sell' && trade.position && (
+                                <div className="flex flex-col col-span-2 pt-2 border-t border-[#2b3139]">
+                                    <span className="text-[9px] text-[#848e9c] uppercase font-bold mb-1">Trade Result (PNL)</span>
+                                    <div className="grid grid-cols-2 gap-2 bg-[#0b0e11] p-2 rounded border border-[#2b3139]">
+                                        <div className="flex flex-col">
+                                            <span className="text-[8px] text-[#848e9c] uppercase">Avg Entry</span>
+                                            <span className="text-[10px] text-[#eaecef] font-mono">${formatNum(trade.position.entry_price)}</span>
+                                        </div>
+                                        <div className="flex flex-col text-right">
+                                            <span className="text-[8px] text-[#848e9c] uppercase">Realized PNL</span>
+                                            <span className={`text-[10px] font-mono font-bold ${isWin ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
+                                                {isWin ? '+' : ''}${pnlAbs} ({pnlPct}%)
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex flex-col col-span-2 pt-2 border-t border-[#2b3139]">
+                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Algorithm Source</span>
+                                <span className="text-xs text-[#fcd535] truncate">{trade.bot_name}</span>
+                            </div>
+                        </div>
+                    </div>
+                )
+            })}
           </div>
         )}
 

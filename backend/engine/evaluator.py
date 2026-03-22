@@ -79,7 +79,7 @@ class NodeEvaluator:
         return False
 
     def resolve_operand(self, operand, index: int):
-        """Helper functie om uit te vinden of iets een getal is, of een indicatornaam in de dataframe."""
+        """Helper functie om uit te vinden of iets een getal is, of een indicatornaam."""
         if isinstance(operand, (int, float)):
             return float(operand)
         if isinstance(operand, str) and operand in self.df.columns:
@@ -87,10 +87,7 @@ class NodeEvaluator:
         return 0.0
 
     def evaluate(self, df: pd.DataFrame) -> bool:
-        """
-        Hoofdfunctie voor live trading.
-        Accepteert een ruwe DataFrame, berekent de indicators en checkt de laatste rij voor koop-actie.
-        """
+        """Hoofdfunctie voor live trading."""
         self.df = df.copy()
         self._calculate_indicators()
         

@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 import io
 import csv
+from typing import Optional
+from datetime import datetime, timezone
 
 from backend.core.database import get_db
 from backend.models.positions import Position
 from backend.models.orders import Order
+from backend.models.candles import Candle
 
 router = APIRouter(
     prefix="/api/trades",
@@ -32,14 +35,8 @@ def get_orders(symbol: str = None, mode: str = None, db: Session = Depends(get_d
     if mode: query = query.filter(Order.mode == mode)
     return query.order_by(Order.timestamp.desc()).all()
 
-from typing import Optional
-
 @router.delete("/bot/{bot_name}")
 def delete_bot_trades(bot_name: str, mode: Optional[str] = None, db: Session = Depends(get_db)):
-    """
-    Verwijdert trade history van een bot.
-    Als mode is meegegeven ('backtest', 'paper', 'live'), verwijdert hij ALLEEN die specifieke data.
-    """
     order_query = db.query(Order).filter(Order.bot_name == bot_name)
     pos_query = db.query(Position).filter(Position.bot_name == bot_name)
     
@@ -52,6 +49,63 @@ def delete_bot_trades(bot_name: str, mode: Optional[str] = None, db: Session = D
     
     db.commit()
     return {"message": f"Deleted {orders_deleted} orders and {pos_deleted} positions for '{bot_name}' in mode: {mode or 'ALL'}."}
+
+@router.delete("/positions/{position_id}")
+def delete_historical_position(position_id: int, db: Session = Depends(get_db)):
+    pos = db.query(Position).filter(Position.id == position_id).first()
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    try:
+        db.delete(pos)
+        db.query(Order).filter(Order.position_id == position_id).delete()
+        db.commit()
+        return {"status": "success", "message": "Trade permanently deleted."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- NIEUW: FORCE CLOSE OPEN POSITIONS ---
+@router.post("/positions/{position_id}/close")
+def force_close_position(position_id: int, db: Session = Depends(get_db)):
+    pos = db.query(Position).filter(Position.id == position_id).first()
+    if not pos:
+        return JSONResponse(status_code=404, content={"detail": "Position not found"})
+    if pos.status == "closed":
+        return JSONResponse(status_code=400, content={"detail": "Position is already closed."})
+
+    try:
+        # Haal de meest recente prijs op uit de database om de PnL te berekenen
+        latest_candle = db.query(Candle).filter(Candle.symbol == pos.symbol).order_by(Candle.timestamp.desc()).first()
+        close_price = latest_candle.close if latest_candle else pos.entry_price
+
+        profit_abs = (close_price - pos.entry_price) * pos.amount if pos.side == "long" else (pos.entry_price - close_price) * pos.amount
+        profit_pct = ((close_price - pos.entry_price) / pos.entry_price) * 100 if pos.side == "long" else ((pos.entry_price - close_price) / pos.entry_price) * 100
+
+        pos.status = "closed"
+        pos.closed_at = datetime.now(timezone.utc)
+        pos.profit_abs = profit_abs
+        pos.profit_pct = profit_pct
+
+        close_order = Order(
+            position_id=pos.id,
+            bot_name=pos.bot_name,
+            mode=pos.mode,
+            symbol=pos.symbol,
+            side="sell" if pos.side == "long" else "buy",
+            order_type="market",
+            price=close_price,
+            amount=pos.amount,
+            timestamp=datetime.now(timezone.utc),
+            status="filled"
+        )
+        db.add(close_order)
+        db.commit()
+
+        return {"status": "success", "message": f"Position forcefully closed at ${close_price:.2f}"}
+    except Exception as e:
+        db.rollback()
+        return JSONResponse(status_code=500, content={"detail": str(e)})
 
 @router.get("/export")
 def export_trades_csv(mode: str = "live", db: Session = Depends(get_db)):

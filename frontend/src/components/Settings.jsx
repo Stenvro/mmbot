@@ -6,7 +6,6 @@ export default function Settings({ setError }) {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   
-  // Nieuwe states voor het ophalen van het saldo
   const [balances, setBalances] = useState({});
   const [fetchingBalanceFor, setFetchingBalanceFor] = useState(null);
   
@@ -16,14 +15,22 @@ export default function Settings({ setError }) {
   const [passphrase, setPassphrase] = useState('');
   const [isSandbox, setIsSandbox] = useState(true);
 
+  const [modalConfig, setModalConfig] = useState(null);
+  
+  const [swapModal, setSwapModal] = useState(null);
+  const [swapFrom, setSwapFrom] = useState('USDT');
+  const [swapTo, setSwapTo] = useState('BTC');
+  const [swapAmount, setSwapAmount] = useState('');
+  const [amountType, setAmountType] = useState('from'); 
+
   const fetchKeys = async () => {
     setRefreshing(true);
     try {
       const response = await apiClient.get('/api/keys');
       setKeys(Array.isArray(response.data) ? response.data : []);
-      setError(null);
+      if (setError) setError(null);
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      if (setError) setError(err.response?.data?.detail || err.message);
     }
     setRefreshing(false);
   };
@@ -35,7 +42,7 @@ export default function Settings({ setError }) {
   const handleSave = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
+    if (setError) setError(null);
     try {
       await apiClient.post('/api/keys', {
         name: keyName,
@@ -45,38 +52,54 @@ export default function Settings({ setError }) {
         passphrase: passphrase,
         is_sandbox: isSandbox
       });
-      alert(`Success! Key '${keyName}' is verified and securely stored.`);
+      setModalConfig({
+        type: 'success',
+        title: 'Connection Saved',
+        message: `Success! Key '${keyName}' is verified and securely stored.`,
+        onConfirm: () => setModalConfig(null)
+      });
       setKeyName('');
       setApiKey('');
       setApiSecret('');
       setPassphrase('');
       fetchKeys();
     } catch (err) {
-      setError(err.response?.data?.detail || "An unexpected error occurred.");
+      if (setError) setError(err.response?.data?.detail || "An unexpected error occurred.");
     }
     setLoading(false);
   };
 
-  const handleDelete = async (delName) => {
-    if (!window.confirm(`Are you sure you want to delete the key '${delName}'?`)) return;
+  const executeDelete = async (delName) => {
     setLoading(true);
     try {
       await apiClient.delete(`/api/keys/${delName}`);
-      // Verwijder ook lokaal uitgeslagen balans data
       setBalances(prev => {
         const newBal = {...prev};
         delete newBal[delName];
         return newBal;
       });
       fetchKeys();
+      setModalConfig(null);
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      if (setError) setError(err.response?.data?.detail || err.message);
+      setModalConfig(null);
     }
     setLoading(false);
   };
 
+  const handleDeleteClick = (delName) => {
+    setModalConfig({
+      type: 'confirm',
+      title: 'Delete Connection',
+      message: `Are you sure you want to permanently delete the key '${delName}'?`,
+      confirmText: 'Delete',
+      confirmColor: 'bg-[#f6465d] hover:bg-[#f6465d]/80 text-white',
+      onConfirm: () => executeDelete(delName),
+      onCancel: () => setModalConfig(null)
+    });
+  };
+
   const handleFetchBalance = async (kName) => {
-    // Als het saldo al open staat, klap hem dan dicht
     if (balances[kName]) {
       setBalances(prev => {
         const newBal = {...prev};
@@ -87,7 +110,7 @@ export default function Settings({ setError }) {
     }
 
     setFetchingBalanceFor(kName);
-    setError(null);
+    if (setError) setError(null);
     try {
       const response = await apiClient.get(`/api/keys/${kName}/balance`);
       setBalances(prev => ({
@@ -95,14 +118,122 @@ export default function Settings({ setError }) {
         [kName]: response.data.balances
       }));
     } catch (err) {
-      setError(err.response?.data?.detail || `Failed to fetch balance for ${kName}`);
+      if (setError) setError(err.response?.data?.detail || `Failed to fetch balance for ${kName}`);
     }
     setFetchingBalanceFor(null);
   };
 
+  const executeSwap = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      try {
+          await apiClient.post(`/api/keys/${swapModal}/swap`, {
+              from_asset: swapFrom,
+              to_asset: swapTo,
+              amount: parseFloat(swapAmount),
+              amount_type: amountType
+          });
+          
+          // FORCE REFRESH THE BALANCE INSTEAD OF TOGGLING IT
+          try {
+              const response = await apiClient.get(`/api/keys/${swapModal}/balance`);
+              setBalances(prev => ({
+                ...prev,
+                [swapModal]: response.data.balances
+              }));
+          } catch (balanceErr) {
+              console.error("Could not auto-refresh balance", balanceErr);
+          }
+
+          setSwapModal(null);
+          setModalConfig({
+            type: 'success',
+            title: 'Swap Executed',
+            message: `Successfully executed manual swap order.`,
+            onConfirm: () => setModalConfig(null)
+          });
+          
+      } catch (err) {
+          setSwapModal(null);
+          setModalConfig({
+            type: 'error',
+            title: 'Swap Failed',
+            message: err.response?.data?.detail || err.message,
+            onConfirm: () => setModalConfig(null)
+          });
+      }
+      setLoading(false);
+  };
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6 w-full fade-in">
+    <div className="max-w-4xl mx-auto space-y-6 w-full fade-in relative">
       
+      {modalConfig && (
+        <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
+          <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-sm w-full p-6 relative">
+            <h3 className={`text-lg font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
+              {modalConfig.title}
+            </h3>
+            <p className="text-[#848e9c] text-sm mb-6 leading-relaxed">
+              {modalConfig.message}
+            </p>
+            <div className="flex justify-end space-x-3">
+              {modalConfig.type === 'confirm' && (
+                <button onClick={modalConfig.onCancel} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">
+                  Cancel
+                </button>
+              )}
+              <button 
+                onClick={modalConfig.onConfirm} 
+                className={`px-4 py-2 rounded text-xs font-bold uppercase transition-colors ${modalConfig.confirmColor || 'bg-[#2ebd85] hover:bg-[#2ebd85]/80 text-[#181a20]'}`}
+              >
+                {modalConfig.confirmText || 'OK'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {swapModal && (
+        <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
+          <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-md w-full p-6 relative">
+            <h3 className="text-lg font-bold mb-1 uppercase tracking-wider text-[#eaecef]">Quick Swap / Trade</h3>
+            <p className="text-[#848e9c] text-xs mb-6">Executing on exchange via: <span className="text-[#0ea5e9] font-bold">{swapModal}</span></p>
+            
+            <form onSubmit={executeSwap} className="space-y-4">
+                <div className="flex space-x-4">
+                    <div className="w-1/2">
+                        <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">From Asset (Sell)</label>
+                        <input type="text" required value={swapFrom} onChange={e => setSwapFrom(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#f6465d] font-bold px-3 py-2 text-sm focus:outline-none focus:border-[#0ea5e9] rounded-sm" placeholder="USDT" />
+                    </div>
+                    <div className="w-1/2">
+                        <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">To Asset (Buy)</label>
+                        <input type="text" required value={swapTo} onChange={e => setSwapTo(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#2ebd85] font-bold px-3 py-2 text-sm focus:outline-none focus:border-[#0ea5e9] rounded-sm" placeholder="SOL" />
+                    </div>
+                </div>
+
+                <div className="pt-2">
+                    <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Trade Size</label>
+                    <div className="flex bg-[#0b0e11] border border-[#2b3139] rounded-sm overflow-hidden">
+                        <select value={amountType} onChange={e => setAmountType(e.target.value)} className="bg-[#181a20] text-[#eaecef] text-xs px-2 py-2 border-r border-[#2b3139] outline-none cursor-pointer">
+                            <option value="from">Spend exactly ({swapFrom})</option>
+                            <option value="to">Receive exactly ({swapTo})</option>
+                        </select>
+                        <input type="number" step="any" required value={swapAmount} onChange={e => setSwapAmount(e.target.value)} className="w-full bg-transparent text-[#fcd535] font-mono px-3 py-2 text-sm focus:outline-none" placeholder="Amount..." />
+                    </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-6 border-t border-[#2b3139] mt-6">
+                    <button type="button" onClick={() => setSwapModal(null)} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">Cancel</button>
+                    <button type="submit" disabled={loading} className="px-6 py-2 rounded text-xs font-bold uppercase transition-colors bg-[#0ea5e9] hover:bg-[#0ea5e9]/80 text-[#181a20] disabled:opacity-50">
+                        {loading ? 'Processing...' : 'Execute Market Swap'}
+                    </button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="bg-[#181a20] border border-[#2b3139] p-5 rounded shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-[#848e9c] text-xs font-bold uppercase tracking-wider">Saved API Connections</h3>
@@ -138,18 +269,25 @@ export default function Settings({ setError }) {
                   </div>
                   
                   <div className="flex space-x-4 items-center">
-                    {/* Knop om Saldo te bekijken, alleen zichtbaar als de key actief is */}
                     {k.is_active && (
-                      <button 
-                        onClick={() => handleFetchBalance(k.name)}
-                        disabled={fetchingBalanceFor === k.name}
-                        className="text-[#fcd535] hover:text-[#e5c02a] text-sm font-medium transition-colors disabled:opacity-50"
-                      >
-                        {fetchingBalanceFor === k.name ? 'Loading...' : balances[k.name] ? 'Hide Balance' : 'View Balance'}
-                      </button>
+                      <>
+                        <button 
+                          onClick={() => setSwapModal(k.name)}
+                          className="text-[#0ea5e9] hover:text-[#0ea5e9]/80 text-xs font-bold uppercase transition-colors border border-[#0ea5e9]/30 px-3 py-1 rounded bg-[#0ea5e9]/10"
+                        >
+                          Quick Swap
+                        </button>
+                        <button 
+                          onClick={() => handleFetchBalance(k.name)}
+                          disabled={fetchingBalanceFor === k.name}
+                          className="text-[#fcd535] hover:text-[#e5c02a] text-sm font-medium transition-colors disabled:opacity-50"
+                        >
+                          {fetchingBalanceFor === k.name ? 'Loading...' : balances[k.name] ? 'Hide Balance' : 'View Balance'}
+                        </button>
+                      </>
                     )}
                     <button 
-                      onClick={() => handleDelete(k.name)} 
+                      onClick={() => handleDeleteClick(k.name)} 
                       disabled={loading} 
                       className="text-[#f6465d] hover:text-[#f6465d]/80 text-sm font-medium transition-colors"
                     >
@@ -158,7 +296,6 @@ export default function Settings({ setError }) {
                   </div>
                 </div>
 
-                {/* Uitklapbaar Balans Overzicht */}
                 {balances[k.name] && (
                   <div className="mt-4 pt-3 border-t border-[#2b3139]/50 animate-fade-in">
                     <h4 className="text-[10px] text-[#848e9c] uppercase tracking-wider mb-2">Available Portfolio</h4>
@@ -214,9 +351,6 @@ export default function Settings({ setError }) {
             <button type="submit" disabled={loading} className="w-full bg-[#fcd535] text-[#181a20] px-6 py-2.5 text-sm font-semibold hover:bg-[#e5c02a] disabled:opacity-50 transition-colors rounded-sm">
               {loading ? 'Verifying...' : 'Verify & Save Securely'}
             </button>
-            <p className="text-center text-[#848e9c] text-xs mt-3">
-              Check key integrity and save using Fernet encryption.
-            </p>
           </div>
         </form>
       </div>

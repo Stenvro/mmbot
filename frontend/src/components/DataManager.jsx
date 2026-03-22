@@ -11,12 +11,16 @@ export default function DataManager({ openChart, setError }) {
   const [startDate, setStartDate] = useState('2025-01-01T00:00'); 
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 16));
 
+  // NIEUW: Custom UI Modal States
+  const [modalConfig, setModalConfig] = useState(null);
+  const [pruneDate, setPruneDate] = useState('');
+
   const fetchSummary = async () => {
     try {
       const response = await apiClient.get('/api/data/summary');
       setSummary(response.data);
     } catch (err) {
-      setError(err.message);
+      if (setError) setError(err.message);
     }
   };
 
@@ -27,7 +31,7 @@ export default function DataManager({ openChart, setError }) {
   const handleDownload = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
+    if (setError) setError(null);
     try {
       const payload = {
         timeframe: timeframe,
@@ -36,17 +40,22 @@ export default function DataManager({ openChart, setError }) {
       };
 
       const response = await apiClient.post(`/api/data/fetch/${symbol.toUpperCase()}`, payload);
-      alert(`Success: ${response.data.message} (${response.data.new_saved} new candles)`);
+      setModalConfig({
+        type: 'success',
+        title: 'Download Complete',
+        message: `${response.data.message} (${response.data.new_saved} new candles added).`,
+        onConfirm: () => setModalConfig(null)
+      });
       fetchSummary();
     } catch (err) {
-      setError(err.response?.data?.detail || err.response?.data?.error || err.message);
+      if (setError) setError(err.response?.data?.detail || err.response?.data?.error || err.message);
     }
     setLoading(false);
   };
 
   const handleSync = async (row) => {
     setSyncingSymbol(`${row.symbol}_${row.timeframe}`);
-    setError(null);
+    if (setError) setError(null);
     try {
       const payload = {
         timeframe: row.timeframe,
@@ -56,44 +65,112 @@ export default function DataManager({ openChart, setError }) {
 
       const safeSymbol = row.symbol.replace('/', '-');
       const response = await apiClient.post(`/api/data/fetch/${safeSymbol}`, payload);
-      alert(`Sync Complete for ${row.symbol}: ${response.data.new_saved} new candles fetched and added to vault.`);
+      setModalConfig({
+        type: 'success',
+        title: 'Sync Complete',
+        message: `${row.symbol} synced. ${response.data.new_saved} new candles fetched.`,
+        onConfirm: () => setModalConfig(null)
+      });
       fetchSummary();
     } catch (err) {
-      setError(err.response?.data?.detail || err.response?.data?.error || err.message);
+      if (setError) setError(err.response?.data?.detail || err.response?.data?.error || err.message);
     }
     setSyncingSymbol(null);
   };
 
-  // VERNIEUWDE DELETE FUNCTIE (Ondersteunt "Prunen" voor een bepaalde datum)
-  const handleDelete = async (delSymbol, delTimeframe) => {
-    const pruneDateStr = window.prompt(
-      `Verwijder data voor ${delSymbol} (${delTimeframe})\n\n` +
-      `Optie 1: Typ een datum (bijv. 2025-01-01) om alles DAARVOOR te wissen.\n` +
-      `Optie 2: Laat leeg en druk op OK om ALLES van deze munt te wissen.`
-    );
-
-    if (pruneDateStr === null) return; // Cancel ingedrukt
-
+  const executeDelete = async (delSymbol, delTimeframe, beforeDateStr) => {
     setLoading(true);
     try {
       let endpoint = `/api/data?symbol=${delSymbol}&timeframe=${delTimeframe}`;
-      if (pruneDateStr.trim() !== "") {
-          const isoDate = new Date(pruneDateStr).toISOString();
+      if (beforeDateStr && beforeDateStr.trim() !== "") {
+          const isoDate = new Date(beforeDateStr).toISOString();
           endpoint += `&before_date=${isoDate}`;
       }
 
       const res = await apiClient.delete(endpoint);
-      alert(res.data.message);
+      setModalConfig({
+        type: 'success',
+        title: 'Data Pruned',
+        message: res.data.message,
+        onConfirm: () => setModalConfig(null)
+      });
       fetchSummary();
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      if (setError) setError(err.response?.data?.detail || err.message);
+      setModalConfig(null);
     }
     setLoading(false);
   };
 
+  const handleDeleteClick = (row) => {
+    setPruneDate('');
+    setModalConfig({
+      type: 'prune',
+      title: 'Prune Market Data',
+      symbol: row.symbol,
+      timeframe: row.timeframe,
+      onCancel: () => setModalConfig(null)
+    });
+  };
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 w-full fade-in">
-      
+    <div className="max-w-6xl mx-auto space-y-6 w-full fade-in relative">
+
+      {/* CUSTOM UI MODALS */}
+      {modalConfig && (
+        <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
+          <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-md w-full p-6 relative">
+            
+            {modalConfig.type === 'success' && (
+               <>
+                 <h3 className="text-lg font-bold mb-2 uppercase tracking-wider text-[#2ebd85]">{modalConfig.title}</h3>
+                 <p className="text-[#848e9c] text-sm mb-6 leading-relaxed">{modalConfig.message}</p>
+                 <div className="flex justify-end">
+                   <button onClick={modalConfig.onConfirm} className="px-6 py-2 rounded text-xs font-bold uppercase transition-colors bg-[#2ebd85] hover:bg-[#2ebd85]/80 text-[#181a20]">OK</button>
+                 </div>
+               </>
+            )}
+
+            {modalConfig.type === 'prune' && (
+               <>
+                 <h3 className="text-lg font-bold mb-2 uppercase tracking-wider text-[#f6465d]">{modalConfig.title}</h3>
+                 <p className="text-[#848e9c] text-sm mb-4 leading-relaxed">
+                   Manage local data for <strong>{modalConfig.symbol} ({modalConfig.timeframe})</strong>. Select a date to delete all history before that date, or click 'Delete All' to wipe the entire pair.
+                 </p>
+                 
+                 <label className="block text-xs text-[#848e9c] mb-1.5 uppercase font-bold tracking-wider">Prune Before Date (Optional)</label>
+                 <input 
+                    type="date" 
+                    value={pruneDate} 
+                    onChange={e => setPruneDate(e.target.value)} 
+                    className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] rounded-sm mb-6 color-scheme-dark" 
+                 />
+                 
+                 <div className="flex justify-between items-center pt-2">
+                   <button onClick={modalConfig.onCancel} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">Cancel</button>
+                   <div className="flex space-x-3">
+                     <button 
+                       onClick={() => executeDelete(modalConfig.symbol, modalConfig.timeframe, '')} 
+                       className="px-4 py-2 rounded text-xs font-bold uppercase transition-colors border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10"
+                     >
+                       Delete All
+                     </button>
+                     <button 
+                       onClick={() => executeDelete(modalConfig.symbol, modalConfig.timeframe, pruneDate)} 
+                       disabled={!pruneDate}
+                       className="px-4 py-2 rounded text-xs font-bold uppercase transition-colors bg-[#f6465d] hover:bg-[#f6465d]/80 text-white disabled:opacity-30"
+                     >
+                       Prune Date
+                     </button>
+                   </div>
+                 </div>
+               </>
+            )}
+
+          </div>
+        </div>
+      )}
+
       <div className="bg-[#181a20] border border-[#2b3139] p-5 rounded shadow-sm">
         <h3 className="text-[#848e9c] text-xs font-bold mb-4 uppercase tracking-wider">Download Market Data</h3>
         <form onSubmit={handleDownload} className="flex flex-wrap gap-4 items-end">
@@ -118,7 +195,7 @@ export default function DataManager({ openChart, setError }) {
             <input type="datetime-local" required value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] color-scheme-dark rounded-sm" />
           </div>
 
-          <button type="submit" disabled={loading || syncingSymbol} className="bg-[#fcd535] text-[#181a20] px-6 py-2 text-sm font-semibold hover:bg-[#e5c02a] disabled:opacity-50 transition-colors rounded-sm h-[38px]">
+          <button type="submit" disabled={loading || syncingSymbol !== null} className="bg-[#fcd535] text-[#181a20] px-6 py-2 text-sm font-semibold hover:bg-[#e5c02a] disabled:opacity-50 transition-colors rounded-sm h-[38px]">
             {loading ? 'Fetching...' : 'Download'}
           </button>
         </form>
@@ -167,7 +244,7 @@ export default function DataManager({ openChart, setError }) {
                     </button>
                     
                     <button 
-                      onClick={() => handleDelete(row.symbol, row.timeframe)} 
+                      onClick={() => handleDeleteClick(row)} 
                       disabled={isSyncing || loading}
                       className="text-[#f6465d] hover:text-[#f6465d]/80 font-medium transition-colors disabled:opacity-50"
                     >

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import ccxt
@@ -154,3 +155,75 @@ def delete_exchange_keys(key_name: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Key '{key_name}' not found.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+import time
+@router.post("/{name}/swap")
+async def execute_quick_swap(name: str, request: Request, db: Session = Depends(get_db)):
+    payload = await request.json()
+    try:
+        key_record = db.query(ExchangeKey).filter(ExchangeKey.name == name).first()
+        if not key_record: 
+            return JSONResponse(status_code=404, content={"detail": f"API Wallet '{name}' not found"})
+        
+        dec_key = decrypt_data(key_record.api_key)
+        dec_secret = decrypt_data(key_record.api_secret)
+        dec_passphrase = decrypt_data(key_record.passphrase)
+        
+        exchange = ccxt.okx({
+            'apiKey': dec_key, 
+            'secret': dec_secret, 
+            'password': dec_passphrase, 
+            'enableRateLimit': True,
+            'hostname': 'eea.okx.com'
+        })
+        
+        if key_record.is_sandbox: 
+            exchange.set_sandbox_mode(True)
+        
+        from_asset = payload.get('from_asset', '').upper()
+        to_asset = payload.get('to_asset', '').upper()
+        amount = float(payload.get('amount', 0))
+        
+        exchange.load_markets()
+        symbol_buy = f"{to_asset}/{from_asset}"   
+        symbol_sell = f"{from_asset}/{to_asset}"  
+        
+        if symbol_buy in exchange.markets:
+            ticker = exchange.fetch_ticker(symbol_buy)
+            raw_amount = (amount / ticker['last']) if payload.get('amount_type') == 'from' else amount
+            # NIEUW: Rond het getal af naar de strikte regels van OKX
+            trade_amount = float(exchange.amount_to_precision(symbol_buy, raw_amount))
+            order = exchange.create_market_buy_order(symbol_buy, trade_amount)
+            
+        elif symbol_sell in exchange.markets:
+            ticker = exchange.fetch_ticker(symbol_sell)
+            raw_amount = amount if payload.get('amount_type') == 'from' else (amount / ticker['last'])
+            # NIEUW: Rond het getal af naar de strikte regels van OKX
+            trade_amount = float(exchange.amount_to_precision(symbol_sell, raw_amount))
+            order = exchange.create_market_sell_order(symbol_sell, trade_amount)
+        else:
+            return JSONResponse(status_code=400, content={"detail": f"Trading pair {from_asset}/{to_asset} not supported on this environment."})
+            
+        # Controleer of OKX testnet de order heeft laten hangen wegens geen liquiditeit
+        time.sleep(1.0) 
+        fetched_order = exchange.fetch_order(order['id'], order['symbol'])
+        
+        if fetched_order['status'] == 'canceled':
+            return JSONResponse(status_code=400, content={"detail": f"OKX canceled the order. Reason: Zero liquidity for {order['symbol']} on the Testnet."})
+        if fetched_order['status'] == 'open':
+            exchange.cancel_order(order['id'], order['symbol'])
+            return JSONResponse(status_code=400, content={"detail": f"Order stuck. No volume for {order['symbol']} on the Sandbox. Order auto-canceled to prevent stuck balance."})
+            
+        return {"status": "success", "order": fetched_order}
+        
+    except ccxt.ExchangeError as e:
+        error_msg = str(e)
+        if "51155" in error_msg or "compliance" in error_msg.lower():
+            return JSONResponse(status_code=400, content={"detail": "European Compliance Error (MiCA): You cannot trade USDT on OKX in Europe. Please swap to USDC or EUR instead."})
+        return JSONResponse(status_code=400, content={"detail": error_msg})
+    except ccxt.InsufficientFunds:
+        return JSONResponse(status_code=400, content={"detail": "Insufficient funds in your account to cover this swap amount."})
+    except ccxt.InvalidOrder as e:
+        return JSONResponse(status_code=400, content={"detail": f"Order size too small or invalid for this exchange. ({str(e)})"})
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"detail": str(e)})
