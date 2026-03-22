@@ -17,8 +17,8 @@ const nodeTypes = {
   action: ActionNode,
 };
 
-let idCounter = 1;
-const getId = () => `node_${idCounter++}`;
+// FIX 1: Kogelvrije unieke ID generator (nooit meer overlappende blokken!)
+const getId = () => `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const reactFlowWrapper = useRef(null);
@@ -28,13 +28,14 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const [availableKeys, setAvailableKeys] = useState([]);
   
   const [modalConfig, setModalConfig] = useState(null);
-  
-  // DE MAGIC FIX: Dit voorkomt dat het canvas reset bij re-renders!
   const initRef = useRef(false);
 
+  // FIX 2: React Immutability. We maken nu een diepe kloon, zodat React exact ziet wat we updaten.
   const updateNodeData = useCallback((id, field, value) => {
     setNodes((nds) => nds.map((node) => {
-        if (node.id === id) { node.data = { ...node.data, [field]: value }; }
+        if (node.id === id) { 
+            return { ...node, data: { ...node.data, [field]: value } }; 
+        }
         return node;
     }));
   }, [setNodes]);
@@ -51,7 +52,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const keys = res.data;
         setAvailableKeys(keys);
         setNodes(nds => nds.map(n => {
-            if (n.type === 'apiKey') n.data.availableKeys = keys;
+            if (n.type === 'apiKey') return { ...n, data: { ...n.data, availableKeys: keys } };
             return n;
         }));
     }).catch(() => {});
@@ -62,23 +63,23 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         }));
         setNodes(restoredNodes);
         setEdges(editingBot.settings.ui_layout.edges || []);
-        
-        const maxId = Math.max(0, ...restoredNodes.map(n => parseInt(n.id.split('_')[1] || 0)));
-        idCounter = maxId + 1;
         initRef.current = true;
     } else if (!editingBot) {
         setNodes([
-            { id: 'node_config', type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'forward_test', maxPositions: 1, maxPositionsScope: 'per_pair' } },
-            { id: 'node_pairs', type: 'whitelist', position: { x: 380, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDC' } }
+            { id: getId(), type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'paper', maxPositions: 1, maxPositionsScope: 'per_pair' } },
+            { id: getId(), type: 'whitelist', position: { x: 380, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDT' } }
         ]);
         initRef.current = true;
     }
   }, [editingBot, updateNodeData, deleteNode, setNodes, setEdges]);
 
+  // FIX 3: Veilige update van availableKeys zonder de staat te slopen
   useEffect(() => {
-      if (!initRef.current) return;
+      if (!initRef.current || availableKeys.length === 0) return;
       setNodes(nds => nds.map(n => {
-          if (n.type === 'apiKey') n.data = { ...n.data, availableKeys };
+          if (n.type === 'apiKey') {
+              return { ...n, data: { ...n.data, availableKeys } };
+          }
           return n;
       }));
   }, [availableKeys, setNodes]);
@@ -99,8 +100,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       if (type === 'indicator') { defaultData.indicator = 'rsi'; defaultData.period = 14; }
       if (type === 'condition') { defaultData.operator = '>'; defaultData.rightValue = ''; }
       if (type === 'logic') defaultData.logicType = 'and';
-      if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'forward_test'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; }
-      if (type === 'whitelist') defaultData.pairs = 'BTC/USDC';
+      if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'paper'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; }
+      if (type === 'whitelist') defaultData.pairs = 'BTC/USDT';
       if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; }
       if (type === 'stopLoss' || type === 'takeProfit') { 
           defaultData.triggerType = 'percentage'; defaultData.triggerValue = ''; 
@@ -116,7 +117,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       }
 
       const newNode = { id: getId(), type, position, data: defaultData };
-      setNodes((nds) => nds.concat(newNode));
+      setNodes((nds) => [...nds, newNode]);
     },
     [reactFlowInstance, availableKeys, updateNodeData, deleteNode, setNodes]
   );
@@ -257,16 +258,24 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         if (entryNode) payload.settings.entry_node = traverse(entryNode.id);
         if (exitNode) payload.settings.exit_node = traverse(exitNode.id);
 
-        if (!payload.settings.entry_node) {
-            return showError("No Entry (LONG) logic connected. Engine will ignore this algorithm.");
-        }
+        const hasLogic = !!payload.settings.entry_node;
 
         if (editingBot) {
             await apiClient.put(`/api/bots/${editingBot.id}`, { name: payload.name, settings: payload.settings });
-            setModalConfig({ type: 'success', title: 'Success', message: 'Algorithm Configuration Updated.', onConfirm: () => { setModalConfig(null); closeBuilder(); } });
+            setModalConfig({ 
+                type: hasLogic ? 'success' : 'warning', 
+                title: hasLogic ? 'Success' : 'Draft Saved', 
+                message: hasLogic ? 'Algorithm Configuration Updated.' : 'Your draft is saved, but has no logic yet. The engine will ignore it until you connect an Entry signal.', 
+                onConfirm: () => { setModalConfig(null); closeBuilder(); } 
+            });
         } else {
             await apiClient.post('/api/bots/', payload);
-            setModalConfig({ type: 'success', title: 'Compiled', message: 'Algorithm Successfully Compiled & Deployed.', onConfirm: () => { setModalConfig(null); closeBuilder(); } });
+            setModalConfig({ 
+                type: hasLogic ? 'success' : 'warning', 
+                title: hasLogic ? 'Compiled' : 'Draft Saved', 
+                message: hasLogic ? 'Algorithm Successfully Compiled & Deployed.' : 'Your draft is saved, but has no logic yet. The engine will ignore it until you connect an Entry signal.', 
+                onConfirm: () => { setModalConfig(null); closeBuilder(); } 
+            });
         }
 
     } catch (err) {
@@ -281,12 +290,12 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       {modalConfig && (
         <div className="fixed inset-0 z-[9999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
           <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-sm w-full p-6 relative">
-            <h3 className={`text-lg font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
+            <h3 className={`text-lg font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : modalConfig.type === 'warning' ? 'text-[#fcd535]' : 'text-[#f6465d]'}`}>
               {modalConfig.title}
             </h3>
             <p className="text-[#848e9c] text-sm mb-6 leading-relaxed">{modalConfig.message}</p>
             <div className="flex justify-end">
-              <button onClick={modalConfig.onConfirm} className={`px-6 py-2 rounded text-xs font-bold uppercase transition-colors ${modalConfig.type === 'success' ? 'bg-[#2ebd85] hover:bg-[#2ebd85]/80 text-[#181a20]' : 'bg-[#f6465d] hover:bg-[#f6465d]/80 text-white'}`}>
+              <button onClick={modalConfig.onConfirm} className={`px-6 py-2 rounded text-xs font-bold uppercase transition-colors ${modalConfig.type === 'success' ? 'bg-[#2ebd85] hover:bg-[#2ebd85]/80 text-[#181a20]' : modalConfig.type === 'warning' ? 'bg-[#fcd535] hover:bg-[#e5c02a] text-[#181a20]' : 'bg-[#f6465d] hover:bg-[#f6465d]/80 text-white'}`}>
                 OK
               </button>
             </div>
@@ -331,7 +340,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
 
         <div className="p-5 border-t border-[#2b3139] flex space-x-3 bg-[#0b0e11]/50">
              <button onClick={closeBuilder} className="flex-1 bg-[#2b3139] text-[#eaecef] text-xs font-bold py-2.5 rounded hover:bg-[#3b4149] transition-colors uppercase tracking-wider">Close</button>
-             <button onClick={handleSaveAndCompile} className="flex-1 bg-[#fcd535] text-[#181a20] text-xs font-bold py-2.5 rounded hover:bg-[#e5c02a] transition-colors shadow-sm uppercase tracking-wider">{editingBot ? 'Update' : 'Compile'}</button>
+             <button onClick={handleSaveAndCompile} className="flex-1 bg-[#fcd535] text-[#181a20] text-xs font-bold py-2.5 rounded hover:bg-[#e5c02a] transition-colors shadow-sm uppercase tracking-wider">{editingBot ? 'Update' : 'Save Bot'}</button>
         </div>
       </div>
 
