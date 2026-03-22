@@ -6,7 +6,7 @@ export default function DataManager({ openChart, setError }) {
   const [loading, setLoading] = useState(false);
   const [syncingSymbol, setSyncingSymbol] = useState(null);
   
-  const [symbol, setSymbol] = useState('BTC-EUR');
+  const [symbol, setSymbol] = useState('BTC-USDC');
   const [timeframe, setTimeframe] = useState('1d'); 
   const [startDate, setStartDate] = useState('2025-01-01T00:00'); 
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 16));
@@ -176,7 +176,7 @@ export default function DataManager({ openChart, setError }) {
         <form onSubmit={handleDownload} className="flex flex-wrap gap-4 items-end">
           
           <div className="flex-1 min-w-[150px]">
-            <label className="block text-xs text-[#848e9c] mb-1.5">Pair (e.g. BTC-EUR)</label>
+            <label className="block text-xs text-[#848e9c] mb-1.5">Pair (e.g. BTC-USDC)</label>
             <input type="text" required value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" />
           </div>
 

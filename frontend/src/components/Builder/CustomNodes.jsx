@@ -66,8 +66,8 @@ export const WhitelistNode = ({ id, data }) => (
       <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Tradeable Pairs (Comma Separated)</label>
       <textarea 
         className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#d946ef] outline-none min-h-[60px] resize-none font-mono"
-        placeholder="BTC/USDT, ETH/USDT, SOL/USDT"
-        value={data.pairs || "BTC/USDT"}
+        placeholder="BTC/USDC, ETH/USDC, SOL/USDC"
+        value={data.pairs || "BTC/USDC"}
         onChange={(e) => data.onChange(id, 'pairs', e.target.value)}
       />
     </div>

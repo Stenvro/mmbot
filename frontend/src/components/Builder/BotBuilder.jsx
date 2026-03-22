@@ -69,7 +69,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
     } else if (!editingBot) {
         setNodes([
             { id: 'node_config', type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'forward_test', maxPositions: 1, maxPositionsScope: 'per_pair' } },
-            { id: 'node_pairs', type: 'whitelist', position: { x: 380, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDT' } }
+            { id: 'node_pairs', type: 'whitelist', position: { x: 380, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDC' } }
         ]);
         initRef.current = true;
     }
@@ -100,7 +100,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       if (type === 'condition') { defaultData.operator = '>'; defaultData.rightValue = ''; }
       if (type === 'logic') defaultData.logicType = 'and';
       if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'forward_test'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; }
-      if (type === 'whitelist') defaultData.pairs = 'BTC/USDT';
+      if (type === 'whitelist') defaultData.pairs = 'BTC/USDC';
       if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; }
       if (type === 'stopLoss' || type === 'takeProfit') { 
           defaultData.triggerType = 'percentage'; defaultData.triggerValue = ''; 

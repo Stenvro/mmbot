@@ -159,3 +159,14 @@ async def stop_bot(bot_id: int, db: Session = Depends(get_db)):
     db.commit()
     await event_bus.publish("BOT_STATE_CHANGED", {"bot_id": bot.id, "action": "stopped"})
     return {"message": f"Bot '{bot.name}' stopped.", "is_active": False}
+
+@router.delete("/{bot_name}/cache")
+def clear_bot_cache(bot_name: str, db: Session = Depends(get_db)):
+    """Verwijdert alle getekende signalen en indicatoren van de grafiek voor een specifieke bot"""
+    try:
+        deleted_signals = db.query(Signal).filter(Signal.bot_name == bot_name).delete(synchronize_session=False)
+        db.commit()
+        return {"status": "success", "message": f"Grafiek opgeschoond! {deleted_signals} oude signalen verwijderd."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

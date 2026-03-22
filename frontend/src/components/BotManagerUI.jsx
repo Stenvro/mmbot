@@ -55,6 +55,32 @@ export default function BotManagerUI({ setError }) {
     });
   };
 
+  // NIEUW: Clear Cache functie (roept de backend aan die we eerder hebben gebouwd)
+  const handleClearCacheClick = (bot) => {
+    setModalConfig({
+      type: 'confirm',
+      title: 'Clear Chart Cache',
+      message: `Are you sure you want to clear all drawn signals (T-B / T-S) and indicator data for '${bot.name}' from the chart? Your trade ledger will remain intact.`,
+      confirmText: 'Clear Cache',
+      onConfirm: async () => {
+          try {
+              await apiClient.delete(`/api/bots/${encodeURIComponent(bot.name)}/cache`);
+              fetchBots();
+              setModalConfig({ 
+                  type: 'success', 
+                  title: 'Cache Cleared', 
+                  message: `Chart signals for '${bot.name}' have been successfully cleared.`, 
+                  confirmText: 'OK',
+                  onConfirm: () => setModalConfig(null) 
+              });
+          } catch (e) {
+              setModalConfig({ type: 'error', title: 'Error', message: "Failed to clear cache.", confirmText: 'OK', onConfirm: () => setModalConfig(null) });
+          }
+      },
+      onCancel: () => setModalConfig(null)
+    });
+  };
+
   const updateBotConfig = async (botId, currentBot, updates) => {
     try {
       setBots(bots.map(b => b.id === botId ? { ...b, ...updates, settings: { ...b.settings, ...(updates.settings || {}) } } : b));
@@ -67,17 +93,28 @@ export default function BotManagerUI({ setError }) {
   };
 
   return (
-    <div className="max-w-6xl mx-auto w-full fade-in space-y-6 relative">
+    <div className="max-w-6xl mx-auto w-full fade-in space-y-6 relative pb-10">
       
       {/* CUSTOM UI MODAL */}
       {modalConfig && (
         <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
           <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-sm w-full p-6 relative">
-            <h3 className="text-lg font-bold mb-2 uppercase tracking-wider text-[#f6465d]">{modalConfig.title}</h3>
+            <h3 className={`text-lg font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
+              {modalConfig.title}
+            </h3>
             <p className="text-[#848e9c] text-sm mb-6 leading-relaxed">{modalConfig.message}</p>
             <div className="flex justify-end space-x-3">
-              <button onClick={modalConfig.onCancel} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">Cancel</button>
-              <button onClick={modalConfig.onConfirm} className="px-4 py-2 rounded text-xs font-bold uppercase transition-colors bg-[#f6465d] hover:bg-[#f6465d]/80 text-white">{modalConfig.confirmText}</button>
+              {modalConfig.onCancel && (
+                <button onClick={modalConfig.onCancel} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">
+                  Cancel
+                </button>
+              )}
+              <button 
+                onClick={modalConfig.onConfirm} 
+                className={`px-4 py-2 rounded text-xs font-bold uppercase transition-colors ${modalConfig.type === 'success' ? 'bg-[#2b3139] hover:bg-[#3b4149] text-[#eaecef]' : 'bg-[#f6465d] hover:bg-[#f6465d]/80 text-white'}`}
+              >
+                {modalConfig.confirmText || 'OK'}
+              </button>
             </div>
           </div>
         </div>
@@ -147,7 +184,6 @@ export default function BotManagerUI({ setError }) {
 
                 <div className="p-5 flex-1 flex flex-col space-y-5">
                   
-                  {/* JOUW NIEUWE LOGICA HIER: LIVE BACKTEST vs LIVE TRADE */}
                   <div className="flex flex-col space-y-2">
                     <div className="flex justify-between items-end">
                       <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider">Live Network Routing</span>
@@ -193,18 +229,28 @@ export default function BotManagerUI({ setError }) {
 
                 <div className="p-3 bg-[#0b0e11] border-t border-[#2b3139] flex justify-between items-center">
                   <span className="text-[10px] text-[#848e9c] font-mono">ID: {bot.id} | CREATED: {new Date(bot.created_at).toLocaleDateString()}</span>
-                  <div className="flex space-x-4">
+                  <div className="flex space-x-3 items-center">
                     <button 
                       onClick={() => window.dispatchEvent(new CustomEvent('open-builder', { detail: bot }))}
                       disabled={bot.is_active}
-                      className="text-[#0ea5e9] hover:text-[#0ea5e9]/80 text-[11px] font-bold uppercase transition-colors disabled:opacity-50"
+                      className="text-[#0ea5e9] hover:text-[#0ea5e9]/80 text-[10px] font-bold uppercase transition-colors disabled:opacity-50"
                     >
                       EDIT
                     </button>
+                    <span className="text-[#2b3139]">|</span>
+                    <button 
+                      onClick={() => handleClearCacheClick(bot)}
+                      disabled={bot.is_active}
+                      title="Clear chart signals and cache"
+                      className="text-[#fcd535] hover:text-[#e5c02a] text-[10px] font-bold uppercase transition-colors disabled:opacity-50"
+                    >
+                      CLEAR CACHE
+                    </button>
+                    <span className="text-[#2b3139]">|</span>
                     <button 
                       onClick={() => handleDeleteClick(bot.id, bot.name)}
                       disabled={bot.is_active}
-                      className="text-[#f6465d] hover:text-[#f6465d]/80 text-[11px] font-bold uppercase transition-colors disabled:opacity-50"
+                      className="text-[#f6465d] hover:text-[#f6465d]/80 text-[10px] font-bold uppercase transition-colors disabled:opacity-50"
                     >
                       DELETE
                     </button>

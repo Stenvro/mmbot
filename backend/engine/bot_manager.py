@@ -17,7 +17,6 @@ from backend.core.encryption import decrypt_data
 class BotManager:
     def __init__(self):
         self.running = False
-        # Geheugen voor Trailing Stops en Partial Closes per positie
         self.position_states = {} 
 
     async def start(self):
@@ -56,7 +55,6 @@ class BotManager:
         return exchange
 
     def _calculate_trade_amount(self, current_price, bot_settings):
-        """Berekent de entry size en voorkomt 0-waardes."""
         entry_settings = bot_settings.get("trade_settings", {}).get("entry", {})
         amount_type = entry_settings.get("amount_type", "percentage")
         raw_val = entry_settings.get("amount_value")
@@ -73,7 +71,6 @@ class BotManager:
             return max(trade_amount, 0.0001)
 
     def _check_exits(self, open_position, current_price, is_sell_signal, bot_settings):
-        """Controleert op Take Profit, Stop Loss en Strategy Exits."""
         trade_settings = bot_settings.get("trade_settings", {})
         entry_settings = trade_settings.get("entry", {})
         
@@ -87,7 +84,6 @@ class BotManager:
         })
         state['highest_price'] = max(state['highest_price'], current_price)
 
-        # 1. Stop Losses
         for i, sl in enumerate(entry_settings.get("stop_losses", [])):
             sl_id = f"sl_{i}"
             if sl_id in state['triggered_exits']: continue
@@ -102,7 +98,6 @@ class BotManager:
                 state['triggered_exits'].add(sl_id)
                 break
                 
-        # 2. Take Profits
         if not close_triggered:
             for i, tp in enumerate(entry_settings.get("take_profits", [])):
                 tp_id = f"tp_{i}"
@@ -117,7 +112,6 @@ class BotManager:
                     state['triggered_exits'].add(tp_id)
                     break
                     
-        # 3. Strategy Exit
         if not close_triggered and is_sell_signal:
             close_triggered = True
             exit_settings = trade_settings.get("exit", {})
@@ -159,8 +153,9 @@ class BotManager:
                 
                 is_api_exec = bot.settings.get("api_execution", False)
                 has_key = bool(bot.settings.get("api_key_name"))
-                live_mode = "paper"
                 
+                # Jouw originele fallback: Forward Test
+                live_mode = "forward_test"
                 if is_api_exec and has_key:
                     api_key = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
                     if api_key: live_mode = "paper" if api_key.is_sandbox else "live"
@@ -193,7 +188,6 @@ class BotManager:
 
                 new_signals = []
                 standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
-                
                 just_opened_this_tick = False
 
                 for index, row in evaluator.df.iterrows():
@@ -207,7 +201,6 @@ class BotManager:
                     try: is_sell = bool(evaluator.resolve_node(exit_node, index)) if exit_node else False
                     except Exception: is_sell = False
 
-                    # --- BACKTEST TRADE LOGICA ---
                     if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
                         max_pos = int(bot.settings.get("max_positions", 1))
                         
@@ -227,20 +220,17 @@ class BotManager:
                                 
                                 db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=ts, status="filled"))
                                 
-                                # FIX: Bereken eerst de gerealiseerde PnL over de gesloten stuks!
                                 realized_pnl = (current_price - open_bt_pos.entry_price) * close_qty
                                 open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
                                 open_bt_pos.profit_pct = ((current_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
                                 
-                                # FIX: Als de positie volledig sluit, behoud dan de amount voor de UI History
                                 if close_qty >= open_bt_pos.amount - 0.00001:
                                     open_bt_pos.status = "closed"
                                     open_bt_pos.closed_at = ts
-                                    open_bt_pos = None # Maak slot vrij
+                                    open_bt_pos = None 
                                 else:
-                                    open_bt_pos.amount -= close_qty # Partial close
+                                    open_bt_pos.amount -= close_qty 
 
-                    # --- SIGNALEN ---
                     if ts not in existing_timestamps:
                         indicators = { col: float(row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(row[col]) }
                         if indicators:
@@ -292,6 +282,7 @@ class BotManager:
                         is_sell = bool(evaluator.resolve_node(exit_node, latest_index)) if exit_node else False
                     except Exception: is_sell = False
 
+                    # Jouw API Router Check
                     is_api_exec = bot.settings.get("api_execution", False)
                     has_key = bool(bot.settings.get("api_key_name"))
                     mode = "forward_test"
@@ -313,7 +304,6 @@ class BotManager:
                     ccxt_symbol = symbol.replace('-', '/').upper()
                     just_opened_ids = set()
 
-                    # --- LIVE / FORWARD BUY ---
                     if is_buy and open_count < max_pos:
                         trade_amount = self._calculate_trade_amount(current_price, bot.settings)
                         
@@ -340,11 +330,10 @@ class BotManager:
                         except Exception as e:
                             db.add(Order(bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="canceled"))
 
-                    # --- LIVE / FORWARD SELL ---
                     active_positions = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.status == "open", Position.mode == mode).all()
                     
                     for pos in active_positions:
-                        if pos.id in just_opened_ids: continue # Anti-Wash Trade
+                        if pos.id in just_opened_ids: continue 
                             
                         close_triggered, close_qty, close_reason = self._check_exits(pos, current_price, is_sell, bot.settings)
 
@@ -363,12 +352,10 @@ class BotManager:
                                 
                                 db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=latest_time, exchange_order_id=order_id, status="filled"))
                                 
-                                # FIX: Bereken gerealiseerde PnL over het gesloten gedeelte
                                 realized_pnl = (actual_price - pos.entry_price) * close_qty
                                 pos.profit_abs = (pos.profit_abs or 0.0) + realized_pnl
                                 pos.profit_pct = ((actual_price - pos.entry_price) / pos.entry_price) * 100
 
-                                # FIX: Behoud de amount in de UI als de positie volledig sluit
                                 if close_qty >= pos.amount - 0.00001:
                                     pos.status = "closed"
                                     pos.closed_at = latest_time
@@ -381,7 +368,6 @@ class BotManager:
                             except Exception as e:
                                 db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=latest_time, status="rejected"))
 
-                    # --- SIGNAAL TEKENEN ---
                     standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
                     indicators = { col: float(latest_row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(latest_row[col]) }
 

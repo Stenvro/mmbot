@@ -18,7 +18,7 @@ export default function Settings({ setError }) {
   const [modalConfig, setModalConfig] = useState(null);
   
   const [swapModal, setSwapModal] = useState(null);
-  const [swapFrom, setSwapFrom] = useState('USDT');
+  const [swapFrom, setSwapFrom] = useState('USDC');
   const [swapTo, setSwapTo] = useState('BTC');
   const [swapAmount, setSwapAmount] = useState('');
   const [amountType, setAmountType] = useState('from'); 
@@ -123,6 +123,28 @@ export default function Settings({ setError }) {
     setFetchingBalanceFor(null);
   };
 
+  const openSwapModal = async (kName) => {
+      setSwapModal(kName);
+      // Zorg dat we de balance paraat hebben voor de MAX knop
+      if (!balances[kName]) {
+          try {
+              const response = await apiClient.get(`/api/keys/${kName}/balance`);
+              setBalances(prev => ({ ...prev, [kName]: response.data.balances }));
+          } catch(e) {}
+      }
+  };
+
+  // NIEUW: Max Knop Functionaliteit
+  const handleMaxClick = () => {
+      const walletBalances = balances[swapModal];
+      if (!walletBalances || !walletBalances[swapFrom]) {
+          setModalConfig({ type: 'error', title: 'Insufficient Funds', message: `You don't have any ${swapFrom} in this wallet.`, onConfirm: () => setModalConfig(null) });
+          return;
+      }
+      setAmountType('from');
+      setSwapAmount(walletBalances[swapFrom].free);
+  };
+
   const executeSwap = async (e) => {
       e.preventDefault();
       setLoading(true);
@@ -134,24 +156,23 @@ export default function Settings({ setError }) {
               amount_type: amountType
           });
           
-          // FORCE REFRESH THE BALANCE INSTEAD OF TOGGLING IT
-          try {
-              const response = await apiClient.get(`/api/keys/${swapModal}/balance`);
-              setBalances(prev => ({
-                ...prev,
-                [swapModal]: response.data.balances
-              }));
-          } catch (balanceErr) {
-              console.error("Could not auto-refresh balance", balanceErr);
-          }
-
           setSwapModal(null);
           setModalConfig({
             type: 'success',
             title: 'Swap Executed',
-            message: `Successfully executed manual swap order.`,
+            message: `Successfully executed market order. Updating balance...`,
             onConfirm: () => setModalConfig(null)
           });
+
+          setTimeout(async () => {
+              try {
+                  const response = await apiClient.get(`/api/keys/${swapModal}/balance`);
+                  setBalances(prev => ({
+                    ...prev,
+                    [swapModal]: response.data.balances
+                  }));
+              } catch (balanceErr) {}
+          }, 1500);
           
       } catch (err) {
           setSwapModal(null);
@@ -204,7 +225,7 @@ export default function Settings({ setError }) {
                 <div className="flex space-x-4">
                     <div className="w-1/2">
                         <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">From Asset (Sell)</label>
-                        <input type="text" required value={swapFrom} onChange={e => setSwapFrom(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#f6465d] font-bold px-3 py-2 text-sm focus:outline-none focus:border-[#0ea5e9] rounded-sm" placeholder="USDT" />
+                        <input type="text" required value={swapFrom} onChange={e => setSwapFrom(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#f6465d] font-bold px-3 py-2 text-sm focus:outline-none focus:border-[#0ea5e9] rounded-sm" placeholder="USDC" />
                     </div>
                     <div className="w-1/2">
                         <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">To Asset (Buy)</label>
@@ -220,6 +241,7 @@ export default function Settings({ setError }) {
                             <option value="to">Receive exactly ({swapTo})</option>
                         </select>
                         <input type="number" step="any" required value={swapAmount} onChange={e => setSwapAmount(e.target.value)} className="w-full bg-transparent text-[#fcd535] font-mono px-3 py-2 text-sm focus:outline-none" placeholder="Amount..." />
+                        <button type="button" onClick={handleMaxClick} className="bg-[#2b3139] hover:bg-[#3b4149] text-[#fcd535] text-[10px] font-bold uppercase px-3 transition-colors border-l border-[#2b3139]">MAX</button>
                     </div>
                 </div>
 
@@ -272,7 +294,7 @@ export default function Settings({ setError }) {
                     {k.is_active && (
                       <>
                         <button 
-                          onClick={() => setSwapModal(k.name)}
+                          onClick={() => openSwapModal(k.name)}
                           className="text-[#0ea5e9] hover:text-[#0ea5e9]/80 text-xs font-bold uppercase transition-colors border border-[#0ea5e9]/30 px-3 py-1 rounded bg-[#0ea5e9]/10"
                         >
                           Quick Swap
@@ -326,8 +348,8 @@ export default function Settings({ setError }) {
         <h3 className="text-[#848e9c] text-xs font-bold mb-4 uppercase tracking-wider">Add New Exchange Key</h3>
         <form onSubmit={handleSave} className="space-y-4">
           <div>
-            <label className="block text-xs text-[#848e9c] mb-1.5">Connection Name (e.g. "Main Algo" or "Test Bot 1")</label>
-            <input type="text" required value={keyName} onChange={e => setKeyName(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" placeholder="Name this connection" />
+            <label className="block text-xs text-[#848e9c] mb-1.5">Connection Name</label>
+            <input type="text" required value={keyName} onChange={e => setKeyName(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" placeholder="e.g. Main Algo" />
           </div>
           <div>
             <label className="block text-xs text-[#848e9c] mb-1.5">API Key</label>

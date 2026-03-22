@@ -13,17 +13,18 @@ const formatCrypto = (val) => {
 
 export default function TradeManager({ setError }) {
   const [positions, setPositions] = useState([]);
-  const [orders, setOrders] = useState([]); // NIEUW: Orders State
+  const [orders, setOrders] = useState([]); 
   const [bots, setBots] = useState([]);
   const [apiKeys, setApiKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalConfig, setModalConfig] = useState(null);
   
-  const [activeTab, setActiveTab] = useState('positions'); // NIEUW: Tab Switcher
+  const [activeTab, setActiveTab] = useState('positions'); 
 
   const [filterMode, setFilterMode] = useState('all');
   const [filterKey, setFilterKey] = useState('all');
   const [filterBot, setFilterBot] = useState('all');
+  const [filterSymbol, setFilterSymbol] = useState('all');
 
   const fetchAllData = async () => {
     setLoading(true);
@@ -32,7 +33,7 @@ export default function TradeManager({ setError }) {
           apiClient.get('/api/trades/positions'),
           apiClient.get('/api/bots/'),
           apiClient.get('/api/keys'),
-          apiClient.get('/api/trades/orders') // Haal nu ook alle ruwe orders op
+          apiClient.get('/api/trades/orders') 
       ]);
       setPositions(posRes.data || []);
       setBots(botRes.data || []);
@@ -52,7 +53,7 @@ export default function TradeManager({ setError }) {
   const getApiKeyForPos = useCallback((item) => {
       if (item.mode === 'backtest') return 'Local Backtest';
       const bot = bots.find(b => b.name === item.bot_name);
-      return bot?.settings?.api_key_name || 'Unassigned (Forward Test)';
+      return bot?.settings?.api_key_name || 'Unassigned';
   }, [bots]);
 
   const deleteHistoricalTrade = async (id) => {
@@ -102,29 +103,31 @@ export default function TradeManager({ setError }) {
           .filter(p => filterMode === 'all' || p.mode === filterMode)
           .filter(p => filterKey === 'all' || getApiKeyForPos(p) === filterKey)
           .filter(p => filterBot === 'all' || p.bot_name === filterBot)
+          .filter(p => filterSymbol === 'all' || p.symbol === filterSymbol)
           .sort((a, b) => {
               const dateA = a.closed_at ? new Date(a.closed_at) : new Date(0);
               const dateB = b.closed_at ? new Date(b.closed_at) : new Date(0);
               return dateB - dateA;
           });
-  }, [positions, filterMode, filterKey, filterBot, getApiKeyForPos]);
+  }, [positions, filterMode, filterKey, filterBot, filterSymbol, getApiKeyForPos]);
 
   const activePositions = useMemo(() => {
       return positions
           .filter(p => p.status === 'open')
           .filter(p => filterMode === 'all' || p.mode === filterMode)
           .filter(p => filterKey === 'all' || getApiKeyForPos(p) === filterKey)
-          .filter(p => filterBot === 'all' || p.bot_name === filterBot);
-  }, [positions, filterMode, filterKey, filterBot, getApiKeyForPos]);
+          .filter(p => filterBot === 'all' || p.bot_name === filterBot)
+          .filter(p => filterSymbol === 'all' || p.symbol === filterSymbol);
+  }, [positions, filterMode, filterKey, filterBot, filterSymbol, getApiKeyForPos]);
 
-  // NIEUW: Gefilterde Ruwe Orders
   const filteredOrders = useMemo(() => {
       return orders
           .filter(o => filterMode === 'all' || o.mode === filterMode)
           .filter(o => filterKey === 'all' || getApiKeyForPos(o) === filterKey)
           .filter(o => filterBot === 'all' || o.bot_name === filterBot)
+          .filter(o => filterSymbol === 'all' || o.symbol === filterSymbol)
           .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  }, [orders, filterMode, filterKey, filterBot, getApiKeyForPos]);
+  }, [orders, filterMode, filterKey, filterBot, filterSymbol, getApiKeyForPos]);
 
   const stats = useMemo(() => {
       const wins = closedPositions.filter(p => (p.profit_abs || 0) > 0);
@@ -158,6 +161,13 @@ export default function TradeManager({ setError }) {
       positions.forEach(p => bts.add(p.bot_name));
       return Array.from(bts);
   }, [positions]);
+
+  const uniqueSymbols = useMemo(() => {
+      const syms = new Set();
+      positions.forEach(p => syms.add(p.symbol));
+      orders.forEach(o => syms.add(o.symbol));
+      return Array.from(syms);
+  }, [positions, orders]);
 
   const bulkDelete = async () => {
       if (closedPositions.length === 0) return;
@@ -243,9 +253,16 @@ export default function TradeManager({ setError }) {
           <div className="flex space-x-4 flex-wrap gap-y-3">
               <div className="flex flex-col">
                   <span className="text-[9px] font-bold text-[#848e9c] uppercase mb-1">Filter by Bot</span>
-                  <select value={filterBot} onChange={e => setFilterBot(e.target.value)} className="bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] text-xs rounded px-3 py-1.5 focus:border-[#0ea5e9] outline-none min-w-[140px]">
+                  <select value={filterBot} onChange={e => setFilterBot(e.target.value)} className="bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] text-xs rounded px-3 py-1.5 focus:border-[#0ea5e9] outline-none min-w-[120px]">
                       <option value="all">All Bots</option>
                       {uniqueBots.map(b => <option key={b} value={b}>{b}</option>)}
+                  </select>
+              </div>
+              <div className="flex flex-col">
+                  <span className="text-[9px] font-bold text-[#848e9c] uppercase mb-1">Filter by Pair</span>
+                  <select value={filterSymbol} onChange={e => setFilterSymbol(e.target.value)} className="bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] text-xs rounded px-3 py-1.5 focus:border-[#d946ef] outline-none min-w-[120px]">
+                      <option value="all">All Pairs</option>
+                      {uniqueSymbols.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
               </div>
               <div className="flex flex-col">
@@ -254,13 +271,12 @@ export default function TradeManager({ setError }) {
                       <option value="all">All Modes</option>
                       <option value="live">Live Exchange</option>
                       <option value="paper">Paper Trading</option>
-                      <option value="forward_test">Forward Test</option>
                       <option value="backtest">Local Backtest</option>
                   </select>
               </div>
               <div className="flex flex-col">
                   <span className="text-[9px] font-bold text-[#848e9c] uppercase mb-1">Filter by Wallet</span>
-                  <select value={filterKey} onChange={e => setFilterKey(e.target.value)} className="bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] text-xs rounded px-3 py-1.5 focus:border-[#2ebd85] outline-none min-w-[160px]">
+                  <select value={filterKey} onChange={e => setFilterKey(e.target.value)} className="bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] text-xs rounded px-3 py-1.5 focus:border-[#2ebd85] outline-none min-w-[140px]">
                       <option value="all">All Wallets</option>
                       {uniqueKeys.map(k => <option key={k} value={k}>{k}</option>)}
                   </select>
@@ -316,7 +332,6 @@ export default function TradeManager({ setError }) {
 
       {activeTab === 'positions' ? (
           <>
-            {/* ACTIVE POSITIONS */}
             <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-sm overflow-hidden mb-6">
                <div className="p-4 border-b border-[#2b3139] bg-[#0b0e11]/50 flex justify-between items-center">
                   <h3 className="text-[#eaecef] font-bold text-sm uppercase tracking-wider">Active Open Positions ({activePositions.length})</h3>
@@ -343,7 +358,7 @@ export default function TradeManager({ setError }) {
                                       {pos.bot_name}
                                       <span className="ml-2 bg-[#2b3139] px-1.5 py-0.5 rounded text-[8px] uppercase text-[#848e9c]">{pos.mode}</span>
                                   </td>
-                                  <td className="p-3 text-[#848e9c]">{getApiKeyForPos(pos) || 'None'}</td>
+                                  <td className="p-3 text-[#848e9c]">{getApiKeyForPos(pos)}</td>
                                   <td className="p-3 font-bold">{pos.symbol}</td>
                                   <td className="p-3"><span className="text-[#2ebd85] font-bold uppercase">{pos.side}</span></td>
                                   <td className="p-3 font-mono text-right">${safeNum(pos.entry_price)}</td>
@@ -359,7 +374,6 @@ export default function TradeManager({ setError }) {
                )}
             </div>
 
-            {/* HISTORICAL LEDGER */}
             <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-sm overflow-hidden pb-4">
                <div className="p-4 border-b border-[#2b3139] bg-[#0b0e11]/50 flex justify-between items-center">
                   <h3 className="text-[#eaecef] font-bold text-sm uppercase tracking-wider">Historical Trade Ledger</h3>
@@ -418,7 +432,6 @@ export default function TradeManager({ setError }) {
             </div>
           </>
       ) : (
-          /* RAW ORDER LOG TAB */
           <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-sm overflow-hidden pb-4">
              <div className="p-4 border-b border-[#2b3139] bg-[#0b0e11]/50">
                 <h3 className="text-[#eaecef] font-bold text-sm uppercase tracking-wider">Raw Order Execution Log</h3>
