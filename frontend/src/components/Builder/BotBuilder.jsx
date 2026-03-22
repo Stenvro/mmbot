@@ -102,7 +102,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       if (type === 'logic') defaultData.logicType = 'and';
       if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'paper'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; }
       if (type === 'whitelist') defaultData.pairs = 'BTC/USDT';
-      if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; }
+      // HIER DE LOOKBACK DEFAULT AANGEPAST
+      if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; defaultData.lookback = 150; }
       if (type === 'stopLoss' || type === 'takeProfit') { 
           defaultData.triggerType = 'percentage'; defaultData.triggerValue = ''; 
           defaultData.closeType = 'percentage'; defaultData.closeValue = 100;
@@ -157,6 +158,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 api_execution: configNode.data.executionMode === 'exchange',
                 backtest_on_start: backtestNode ? backtestNode.data.runOnStart : false,
                 backtest_capital: backtestNode ? backtestNode.data.capital : 1000,
+                // HIER DE LOOKBACK PAYLOAD AANGEPAST
+                backtest_lookback: backtestNode ? (backtestNode.data.lookback || 150) : 150,
                 api_key_name: apiKeyNode ? apiKeyNode.data.apiKeyName : null,
                 trade_settings: {}, 
                 nodes: {},

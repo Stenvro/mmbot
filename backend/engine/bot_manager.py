@@ -177,13 +177,20 @@ class BotManager:
                 timeframe = bot.settings.get("timeframe")
                 exit_node = bot.settings.get("exit_node")
                 run_backtest = bot.settings.get("backtest_on_start", False)
+                
+                # HIER DE LOOKBACK UITGELEZEN
+                lookback_limit = int(bot.settings.get("backtest_lookback", 150))
 
+                # HIER DE QUERY AANGEPAST MET DESC().LIMIT()
                 query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
                     Candle.symbol == symbol, Candle.timeframe == timeframe
-                ).order_by(Candle.timestamp.asc()).statement
+                ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
                 
                 df = pd.read_sql(query, db.bind)
                 if df.empty: return
+                
+                # OMDRAAIEN ZODAT ZE WEER CHRONOLOGISCH STAAN
+                df = df.sort_values('timestamp').reset_index(drop=True)
 
                 evaluator = NodeEvaluator(bot.settings)
                 evaluator.df = df.copy()
@@ -269,9 +276,12 @@ class BotManager:
                 matching_bots = [b for b in active_bots if b.settings.get("symbol") == symbol and b.settings.get("timeframe") == timeframe]
                 if not matching_bots: return
 
+                # HIER BEPALEN WE DE MAX LOOKBACK VOOR ALLE BOTS DIE NU TRIGGEREN
+                max_lookback = max([int(b.settings.get("backtest_lookback", 150)) for b in matching_bots], default=150)
+
                 query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
                     Candle.symbol == symbol, Candle.timeframe == timeframe
-                ).order_by(Candle.timestamp.desc()).limit(150).statement
+                ).order_by(Candle.timestamp.desc()).limit(max_lookback).statement
                 
                 df = pd.read_sql(query, db.bind)
                 if df.empty: return

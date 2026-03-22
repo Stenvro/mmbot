@@ -75,7 +75,7 @@ export const WhitelistNode = ({ id, data }) => (
 );
 
 export const BacktestNode = ({ id, data }) => (
-  <div className="bg-[#181a20] border border-[#fcd535] rounded shadow-lg min-w-[260px]">
+  <div className="bg-[#181a20] border border-[#fcd535] rounded shadow-lg min-w-[280px]">
     <div className="bg-[#fcd535]/10 px-3 py-2 border-b border-[#fcd535]/30 flex justify-between items-center">
       <span className="font-bold text-[#fcd535] text-[11px] uppercase tracking-wider">BACKTEST ENGINE</span>
       {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
@@ -85,9 +85,15 @@ export const BacktestNode = ({ id, data }) => (
         <input type="checkbox" className="form-checkbox h-4 w-4 text-[#fcd535] rounded border-[#2b3139] bg-[#181a20] focus:ring-0 focus:ring-offset-0" checked={data.runOnStart !== false} onChange={(e) => data.onChange(id, 'runOnStart', e.target.checked)} />
         <span className="ml-3 text-xs text-[#eaecef] font-medium">Run historical backtest on start</span>
       </label>
-      <div className="pt-2 border-t border-[#2b3139]">
-        <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Starting Capital (Base Currency)</label>
-        <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono" value={data.capital || 1000} onChange={(e) => data.onChange(id, 'capital', parseFloat(e.target.value))} />
+      <div className="flex space-x-2 pt-2 border-t border-[#2b3139]">
+        <div className="w-1/2">
+            <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Start Capital</label>
+            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono text-center" value={data.capital || 1000} onChange={(e) => data.onChange(id, 'capital', parseFloat(e.target.value))} />
+        </div>
+        <div className="w-1/2">
+            <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Candles (Lookback)</label>
+            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono text-center" value={data.lookback || 150} onChange={(e) => data.onChange(id, 'lookback', parseInt(e.target.value))} />
+        </div>
       </div>
     </div>
   </div>
@@ -152,7 +158,6 @@ export const IndicatorNode = ({ id, data }) => (
 // HIER IS DE NIEUWE CONDITION NODE (Logisch en overzichtelijk)
 export const ConditionNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#3b4149] rounded shadow-lg min-w-[260px] relative">
-    {/* Twee strakke Handles aan de linkerkant */}
     <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-3 h-3 bg-[#0ea5e9] border-2 border-[#181a20]" />
     <Handle type="target" position={Position.Left} id="right" style={{ top: '80%' }} className="w-3 h-3 bg-[#d946ef] border-2 border-[#181a20]" />
     
@@ -162,12 +167,9 @@ export const ConditionNode = ({ id, data }) => (
     </div>
     
     <div className="p-4 bg-[#0b0e11]/80 rounded-b flex flex-col space-y-4">
-      {/* ROW 1: INPUT A */}
       <div className="flex items-center">
          <span className="text-[10px] text-[#0ea5e9] font-bold uppercase ml-1">Input A (Signal)</span>
       </div>
-
-      {/* ROW 2: OPERATOR */}
       <div className="flex justify-center border-y border-[#2b3139] py-2">
         <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag font-bold focus:border-[#fcd535] outline-none text-center" value={data.operator || ">"} onChange={(e) => data.onChange(id, 'operator', e.target.value)}>
           <option value=">">IS GREATER THAN (&gt;)</option>
@@ -177,8 +179,6 @@ export const ConditionNode = ({ id, data }) => (
           <option value="<=">LESS OR EQUAL (&lt;=)</option>
         </select>
       </div>
-
-      {/* ROW 3: INPUT B / STATIC */}
       <div className="flex items-center justify-between">
          <span className="text-[10px] text-[#d946ef] font-bold uppercase ml-1">Input B</span>
          <div className="flex items-center space-x-2">
@@ -188,7 +188,6 @@ export const ConditionNode = ({ id, data }) => (
       </div>
     </div>
     
-    {/* Eén Output Handle aan de rechterkant */}
     <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#fcd535] border-2 border-[#181a20]" />
   </div>
 );
