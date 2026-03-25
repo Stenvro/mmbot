@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import ccxt
 import asyncio
 from contextlib import asynccontextmanager
@@ -44,7 +45,13 @@ app = FastAPI(
     swagger_ui_init_oauth={"clientId": "test"},
     lifespan=lifespan  
 )
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Hiermee mag elk apparaat in je netwerk erbij
+    allow_credentials=True,
+    allow_methods=["*"],  # Dit staat GET, POST, OPTIONS, etc. toe
+    allow_headers=["*"],  # Dit staat alle headers toe (zoals je API-sleutels)
+)
 # Connect routers to the main application
 app.include_router(keys.router)
 app.include_router(data.router)

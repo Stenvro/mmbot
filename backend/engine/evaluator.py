@@ -15,10 +15,10 @@ class NodeEvaluator:
             if node.get("class") == "indicator":
                 method = node.get("method")
                 params = node.get("params", [])
+                out_idx = int(node.get("output_idx", 0)) # Nieuwe Parameter!
                 
                 if hasattr(self.df.ta, method):
                     try:
-                        # Slimme check voor Pandas TA argumenten
                         if isinstance(params, list):
                             res = getattr(self.df.ta, method)(*params)
                         elif isinstance(params, dict):
@@ -26,78 +26,91 @@ class NodeEvaluator:
                         else:
                             res = getattr(self.df.ta, method)(params)
                         
-                        # pandas_ta geeft soms 1 kolom terug (RSI), soms meerdere (MACD, BBANDS)
+                        # --- FIX: MULTI-LINE INDICATOR SELECTOR ---
+                        # Pandas-TA geeft bijv. voor MACD 3 kolommen terug. 
+                        # We pakken precies de kolom die de user in de Builder heeft gekozen.
                         if isinstance(res, pd.DataFrame):
-                            # Neem de eerste resultaat-kolom (vaak de hoofdlijn van de indicator)
-                            self.df[node_id] = res.iloc[:, 0] 
+                            if out_idx < len(res.columns):
+                                self.df[node_id] = res.iloc[:, out_idx]
+                            else:
+                                self.df[node_id] = res.iloc[:, 0] # Fallback
                         else:
                             self.df[node_id] = res
-                            
                     except Exception as e:
                         print(f"❌ Error calculating indicator {method}: {e}")
 
-    def resolve_node(self, node_id: str, index: int):
-        """Evalueert een specifieke node recursief (zoals een logic of condition)."""
+        # Bereken ALTIJD de ATR voor de Stop Loss!
+        try:
+            h = pd.to_numeric(self.df['high'], errors='coerce')
+            l = pd.to_numeric(self.df['low'], errors='coerce')
+            c = pd.to_numeric(self.df['close'], errors='coerce')
+            self.df['atr'] = ta.atr(h, l, c, length=14)
+        except Exception:
+            self.df['atr'] = 0.0
+
+    def resolve_node(self, node_id: str) -> pd.Series:
         if not node_id:
-            return False
+            return pd.Series(False, index=self.df.index)
             
         nodes = self.settings.get("nodes", {})
         node = nodes.get(node_id)
         if not node:
-            return False
+            return pd.Series(False, index=self.df.index)
 
         node_class = node.get("class")
 
-        # 1. Indicator Node: Geef de berekende waarde terug
         if node_class == "indicator":
-            return float(self.df.at[index, node_id]) if node_id in self.df.columns else 0.0
+            if node_id in self.df.columns:
+                return self.df[node_id]
+            return pd.Series(0.0, index=self.df.index)
 
-        # 2. Condition Node: Vergelijk twee waarden (bijv: RSI < 40)
+        elif node_class == "price_data":
+            price_type = node.get("type", "close").lower()
+            offset = int(node.get("offset", 0))
+            if price_type in self.df.columns:
+                return self.df[price_type].shift(offset).fillna(0.0)
+            return pd.Series(0.0, index=self.df.index)
+
         elif node_class == "condition":
-            left_val = self.resolve_operand(node.get("left"), index)
-            right_val = self.resolve_operand(node.get("right"), index)
+            left_s = self.resolve_operand(node.get("left"))
+            right_s = self.resolve_operand(node.get("right"))
             op = node.get("operator")
 
-            if op == ">": return left_val > right_val
-            if op == "<": return left_val < right_val
-            if op == ">=": return left_val >= right_val
-            if op == "<=": return left_val <= right_val
-            if op == "==": return left_val == right_val
-            if op == "!=": return left_val != right_val
-            return False
+            if op == "cross_above":
+                return (left_s.shift(1) <= right_s.shift(1)) & (left_s > right_s)
+            elif op == "cross_below":
+                return (left_s.shift(1) >= right_s.shift(1)) & (left_s < right_s)
+            elif op == ">": return left_s > right_s
+            elif op == "<": return left_s < right_s
+            elif op == ">=": return left_s >= right_s
+            elif op == "<=": return left_s <= right_s
+            elif op == "==": return left_s == right_s
+            elif op == "!=": return left_s != right_s
+            return pd.Series(False, index=self.df.index)
 
-        # 3. Logic Node: Combineer twee condities (bijv: COND_1 AND COND_2)
         elif node_class == "logic":
-            left_val = bool(self.resolve_node(node.get("left"), index))
-            right_val = bool(self.resolve_node(node.get("right"), index))
+            left_s = self.resolve_node(node.get("left")).astype(bool)
+            right_s = self.resolve_node(node.get("right")).astype(bool) if node.get("right") else pd.Series(False, index=self.df.index)
             op = node.get("operator", "and").lower()
 
-            if op == "and": return left_val and right_val
-            if op == "or": return left_val or right_val
-            return False
+            if op == "and": return left_s & right_s
+            if op == "or": return left_s | right_s
+            if op == "xor": return left_s ^ right_s
+            if op == "nand": return ~(left_s & right_s)
+            if op == "nor": return ~(left_s | right_s)
+            if op == "not": return ~left_s
+            return pd.Series(False, index=self.df.index)
 
-        return False
+        return pd.Series(0.0, index=self.df.index)
 
-    def resolve_operand(self, operand, index: int):
-        """Helper functie om uit te vinden of iets een getal is, of een indicatornaam."""
+    def resolve_operand(self, operand) -> pd.Series:
         if isinstance(operand, (int, float)):
-            return float(operand)
-        if isinstance(operand, str) and operand in self.df.columns:
-            return float(self.df.at[index, operand])
-        return 0.0
-
-    def evaluate(self, df: pd.DataFrame) -> bool:
-        """Hoofdfunctie voor live trading."""
-        self.df = df.copy()
-        self._calculate_indicators()
-        
-        if self.df.empty or not self.entry_trigger:
-            return False
-            
-        latest_index = len(self.df) - 1
-        
+            return pd.Series(float(operand), index=self.df.index)
+        if isinstance(operand, str):
+            if operand in self.df.columns:
+                return self.df[operand]
+            return self.resolve_node(operand)
         try:
-            return bool(self.resolve_node(self.entry_trigger, latest_index))
-        except Exception as e:
-            print(f"❌ Strategy Evaluation Error: {e}")
-            return False
+            return pd.Series(float(operand), index=self.df.index)
+        except (ValueError, TypeError):
+            return pd.Series(0.0, index=self.df.index)

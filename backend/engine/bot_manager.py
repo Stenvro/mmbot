@@ -1,4 +1,5 @@
 import asyncio
+import time
 import pandas as pd
 import ccxt
 from datetime import datetime, timezone
@@ -70,70 +71,89 @@ class BotManager:
             trade_amount = investment / current_price
             return max(trade_amount, 0.0001)
 
-    def _check_exits(self, open_position, current_price, is_sell_signal, bot_settings, df=None):
+    def _check_exits(self, open_position, row_close, row_high, row_low, is_sell_signal, bot_settings, current_atr=0.0):
         trade_settings = bot_settings.get("trade_settings", {})
         entry_settings = trade_settings.get("entry", {})
-        
-        close_triggered = False
-        close_qty = 0
-        close_reason = None
+        events = []
 
-        state = self.position_states.setdefault(open_position.id, {
-            'highest_price': open_position.entry_price,
-            'triggered_exits': set()
-        })
-        state['highest_price'] = max(state['highest_price'], current_price)
+        state = self.position_states.get(open_position.id)
+        if not state or state.get('entry_price') != open_position.entry_price:
+            self.position_states[open_position.id] = {
+                'entry_price': open_position.entry_price,
+                'highest_price': max(open_position.entry_price, row_high),
+                'triggered_exits': set()
+            }
+            state = self.position_states[open_position.id]
+        else:
+            state['highest_price'] = max(state['highest_price'], row_high)
 
+        sl_hit = False
         for i, sl in enumerate(entry_settings.get("stop_losses", [])):
             sl_id = f"sl_{i}"
             if sl_id in state['triggered_exits']: continue
 
-            trigger_price = 0
-            if sl['type'] == 'percentage':
-                trigger_price = open_position.entry_price * (1 - (float(sl['value'])/100))
-            elif sl['type'] == 'trailing':
-                trigger_price = state['highest_price'] * (1 - (float(sl['value'])/100))
-            elif sl['type'] == 'atr' and df is not None:
-                import pandas_ta_classic as ta
-                multiplier = float(sl['value'])
-                atr_series = ta.atr(df['high'], df['low'], df['close'], length=14)
-                current_atr = atr_series.iloc[-1] if atr_series is not None and not atr_series.empty else 0
-                trigger_price = state['highest_price'] - (multiplier * current_atr)
-            else:
-                trigger_price = float(sl['value'])
+            try: sl_val = float(sl.get('value', 0))
+            except: continue
             
-            if current_price <= trigger_price:
-                close_triggered = True
+            if sl_val <= 0: continue
+
+            if sl['type'] == 'percentage':
+                trigger_price = open_position.entry_price * (1 - (sl_val/100))
+            elif sl['type'] == 'trailing':
+                trigger_price = state['highest_price'] * (1 - (sl_val/100))
+            elif sl['type'] == 'atr':
+                if current_atr <= 0: continue 
+                trigger_price = state['highest_price'] - (sl_val * current_atr)
+            else:
+                trigger_price = sl_val
+            
+            if row_low <= trigger_price:
                 pct_to_close = float(sl.get('close_amount_value', 100))
-                close_qty = open_position.amount * (pct_to_close / 100)
-                close_reason = "stop_loss"
-                state['triggered_exits'].add(sl_id)
-                break
-                
-        if not close_triggered:
+                events.append({
+                    'qty_pct': pct_to_close,
+                    'reason': "stop_loss",
+                    'price': trigger_price, 
+                    'id': sl_id
+                })
+                sl_hit = True
+
+        if not sl_hit:
+            tps = []
             for i, tp in enumerate(entry_settings.get("take_profits", [])):
                 tp_id = f"tp_{i}"
                 if tp_id in state['triggered_exits']: continue
-
-                trigger_price = open_position.entry_price * (1 + (float(tp['value'])/100)) if tp['type'] == 'percentage' else float(tp['value'])
-                if current_price >= trigger_price:
-                    close_triggered = True
-                    pct_to_close = float(tp.get('close_amount_value', 100))
-                    close_qty = open_position.amount * (pct_to_close / 100)
-                    close_reason = "take_profit"
-                    state['triggered_exits'].add(tp_id)
-                    break
-                    
-        if not close_triggered and is_sell_signal:
-            close_triggered = True
+                
+                try: tp_val = float(tp.get('value', 0))
+                except: continue
+                
+                if tp_val <= 0: continue
+                
+                t_price = open_position.entry_price * (1 + (tp_val/100)) if tp['type'] == 'percentage' else tp_val
+                tps.append({'id': tp_id, 'price': t_price, 'pct': float(tp.get('close_amount_value', 100))})
+            
+            tps = sorted(tps, key=lambda x: x['price'])
+            
+            for tp in tps:
+                if row_high >= tp['price']:
+                    events.append({
+                        'qty_pct': tp['pct'],
+                        'reason': "take_profit",
+                        'price': tp['price'], 
+                        'id': tp['id']
+                    })
+        
+        if not events and is_sell_signal:
             exit_settings = trade_settings.get("exit", {})
             pct_to_close = float(exit_settings.get('amount_value', 100)) if exit_settings.get('amount_type') == 'percentage' else 100
-            close_qty = open_position.amount * (pct_to_close / 100)
-            close_reason = "strategy"
+            events.append({
+                'qty_pct': pct_to_close,
+                'reason': "strategy",
+                'price': row_close,
+                'id': 'strategy_sell'
+            })
 
-        return close_triggered, close_qty, close_reason
+        return events
 
-    # FIX: Aangepaste startup functie om de async loop safe te houden
     async def _startup_backfill(self):
         def get_active_bot_ids():
             db = SessionLocal()
@@ -184,13 +204,29 @@ class BotManager:
                     symbols = [bot.settings.get("symbol")]
 
                 for symbol in symbols:
+                    tf_seconds = 60
+                    if timeframe.endswith('m'): tf_seconds = int(timeframe[:-1]) * 60
+                    elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
+                    elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
+                    
+                    for _ in range(20):
+                        latest_candle = db.query(Candle.timestamp).filter(
+                            Candle.symbol == symbol, Candle.timeframe == timeframe
+                        ).order_by(Candle.timestamp.desc()).first()
+                        
+                        if latest_candle:
+                            candle_ts = latest_candle[0]
+                            if candle_ts.tzinfo is None: candle_ts = candle_ts.replace(tzinfo=timezone.utc)
+                            diff_seconds = datetime.now(timezone.utc).timestamp() - candle_ts.timestamp()
+                            if diff_seconds <= (tf_seconds * 2): break
+                        time.sleep(1)
+
                     query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
                         Candle.symbol == symbol, Candle.timeframe == timeframe
                     ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
                     
                     df = pd.read_sql(query, db.bind)
                     if df.empty: continue
-                    
                     df = df.sort_values('timestamp').reset_index(drop=True)
 
                     evaluator = NodeEvaluator(bot.settings)
@@ -204,23 +240,30 @@ class BotManager:
                     
                     if run_backtest:
                         last_order = db.query(Order).filter(Order.bot_name == bot.name, Order.symbol == symbol, Order.mode == "backtest").order_by(Order.timestamp.desc()).first()
-                        if last_order: last_bt_ts = last_order.timestamp
+                        if last_order: 
+                            last_bt_ts = last_order.timestamp
+                            if last_bt_ts.tzinfo is None: last_bt_ts = last_bt_ts.replace(tzinfo=timezone.utc)
+
                         open_bt_pos = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.mode == "backtest", Position.status == "open").first()
 
                     new_signals = []
-                    standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
-                    just_opened_this_tick = False
+                    standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr']
+                    
+                    entry_series = evaluator.resolve_node(bot.settings.get("entry_node")) if bot.settings.get("entry_node") else pd.Series(False, index=evaluator.df.index)
+                    exit_series = evaluator.resolve_node(exit_node) if exit_node else pd.Series(False, index=evaluator.df.index)
 
                     for index, row in evaluator.df.iterrows():
                         ts = row['timestamp']
+                        if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+
                         current_price = float(row['close'])
+                        current_high = float(row['high'])
+                        current_low = float(row['low'])
                         just_opened_this_tick = False
                         
-                        try: is_buy = bool(evaluator.resolve_node(bot.settings.get("entry_node"), index))
-                        except Exception: is_buy = False
-                        
-                        try: is_sell = bool(evaluator.resolve_node(exit_node, index)) if exit_node else False
-                        except Exception: is_sell = False
+                        is_buy = bool(entry_series.iloc[index])
+                        is_sell = bool(exit_series.iloc[index])
+                        current_atr = float(evaluator.df['atr'].iloc[index]) if 'atr' in evaluator.df.columns and not pd.isna(evaluator.df['atr'].iloc[index]) else 0.0
 
                         if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
                             max_pos = int(bot.settings.get("max_positions", 1))
@@ -234,20 +277,30 @@ class BotManager:
                                 just_opened_this_tick = True
 
                             elif open_bt_pos and not just_opened_this_tick:
-                                close_triggered, close_qty, close_reason = self._check_exits(open_bt_pos, current_price, is_sell, bot.settings, evaluator.df.iloc[:index+1])
+                                exit_events = self._check_exits(open_bt_pos, current_price, current_high, current_low, is_sell, bot.settings, current_atr)
                                 
-                                if close_triggered and close_qty > 0:
+                                for ev in exit_events:
+                                    if open_bt_pos is None: break
+                                    
+                                    close_qty = open_bt_pos.amount * (ev['qty_pct'] / 100)
                                     close_qty = min(close_qty, open_bt_pos.amount)
+                                    if close_qty <= 0: continue
+
+                                    actual_price = ev['price']
+                                    db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled"))
                                     
-                                    db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=ts, status="filled"))
-                                    
-                                    realized_pnl = (current_price - open_bt_pos.entry_price) * close_qty
+                                    realized_pnl = (actual_price - open_bt_pos.entry_price) * close_qty
                                     open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
-                                    open_bt_pos.profit_pct = ((current_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
+                                    open_bt_pos.profit_pct = ((actual_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
+                                    
+                                    if open_bt_pos.id in self.position_states:
+                                        self.position_states[open_bt_pos.id]['triggered_exits'].add(ev['id'])
                                     
                                     if close_qty >= open_bt_pos.amount - 0.00001:
                                         open_bt_pos.status = "closed"
                                         open_bt_pos.closed_at = ts
+                                        if open_bt_pos.id in self.position_states:
+                                            del self.position_states[open_bt_pos.id]
                                         open_bt_pos = None 
                                     else:
                                         open_bt_pos.amount -= close_qty 
@@ -258,6 +311,23 @@ class BotManager:
                                 action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
                                 new_signals.append(Signal(candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
 
+                    # --- HARDCORE LOGIC: OPEN BACKTEST POSITIONS MANAGEMENT ---
+                    if run_backtest and open_bt_pos:
+                        if live_mode == "forward_test":
+                            # We zitten in de lokale simulator. De open backtest trade mag DOORLOPEN naar live.
+                            open_bt_pos.mode = "forward_test"
+                            db.query(Order).filter(Order.position_id == open_bt_pos.id).update({"mode": "forward_test"})
+                        else:
+                            # We zitten op een echte API key (live of paper). 
+                            # We kunnen het verleden niet synchroniseren met de API. Wissen!
+                            db.query(Order).filter(Order.position_id == open_bt_pos.id).delete(synchronize_session=False)
+                            db.delete(open_bt_pos)
+                            if open_bt_pos.id in self.position_states:
+                                del self.position_states[open_bt_pos.id]
+                        
+                        open_bt_pos = None
+                    # -----------------------------------------------------------
+
                     if new_signals: db.bulk_save_objects(new_signals)
                     db.commit()
                     print(f"✅ Sync Complete: '{bot.name}' on {symbol} (Target Mode: {live_mode.upper()}) | Lookback: {lookback_limit}")
@@ -267,6 +337,7 @@ class BotManager:
                 db.rollback()
             finally:
                 db.close()
+                
         await asyncio.to_thread(run_backfill)
 
     async def _process_bots(self, symbol: str, timeframe: str):
@@ -303,15 +374,18 @@ class BotManager:
                     latest_index = len(evaluator.df) - 1
                     latest_row = evaluator.df.iloc[latest_index]
                     latest_time = latest_row['timestamp']
-                    current_price = float(latest_row['close'])
-
-                    try: is_buy = bool(evaluator.resolve_node(bot.settings.get("entry_node"), latest_index))
-                    except Exception: is_buy = False
                     
-                    try: 
-                        exit_node = bot.settings.get("exit_node")
-                        is_sell = bool(evaluator.resolve_node(exit_node, latest_index)) if exit_node else False
-                    except Exception: is_sell = False
+                    current_price = float(latest_row['close'])
+                    current_high = float(latest_row['high'])
+                    current_low = float(latest_row['low'])
+                    
+                    current_atr = float(evaluator.df['atr'].iloc[latest_index]) if 'atr' in evaluator.df.columns and not pd.isna(evaluator.df['atr'].iloc[latest_index]) else 0.0
+
+                    entry_series = evaluator.resolve_node(bot.settings.get("entry_node")) if bot.settings.get("entry_node") else pd.Series(False, index=evaluator.df.index)
+                    exit_series = evaluator.resolve_node(bot.settings.get("exit_node")) if bot.settings.get("exit_node") else pd.Series(False, index=evaluator.df.index)
+
+                    is_buy = bool(entry_series.iloc[-1])
+                    is_sell = bool(exit_series.iloc[-1])
 
                     is_api_exec = bot.settings.get("api_execution", False)
                     has_key = bool(bot.settings.get("api_key_name"))
@@ -365,19 +439,23 @@ class BotManager:
                     for pos in active_positions:
                         if pos.id in just_opened_ids: continue 
                             
-                        close_triggered, close_qty, close_reason = self._check_exits(pos, current_price, is_sell, bot.settings, evaluator.df)
+                        exit_events = self._check_exits(pos, current_price, current_high, current_low, is_sell, bot.settings, current_atr)
 
-                        if close_triggered and close_qty > 0:
+                        for ev in exit_events:
+                            if pos.amount <= 0: break
+                            
+                            close_qty = pos.amount * (ev['qty_pct'] / 100)
                             close_qty = min(close_qty, pos.amount)
+                            if close_qty <= 0: continue
                             
                             try:
-                                actual_price = current_price
+                                actual_price = ev['price']
                                 order_id = f"local_{int(latest_time.timestamp())}"
                                 
                                 if mode in ["paper", "live"] and api_key_record:
                                     exchange = self._get_ccxt_instance(api_key_record)
                                     okx_order = exchange.create_market_sell_order(ccxt_symbol, close_qty)
-                                    actual_price = okx_order.get("average") or current_price
+                                    actual_price = okx_order.get("average") or ev['price']
                                     order_id = okx_order.get("id")
                                 
                                 db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=latest_time, exchange_order_id=order_id, status="filled"))
@@ -385,6 +463,9 @@ class BotManager:
                                 realized_pnl = (actual_price - pos.entry_price) * close_qty
                                 pos.profit_abs = (pos.profit_abs or 0.0) + realized_pnl
                                 pos.profit_pct = ((actual_price - pos.entry_price) / pos.entry_price) * 100
+
+                                if pos.id in self.position_states:
+                                    self.position_states[pos.id]['triggered_exits'].add(ev['id'])
 
                                 if close_qty >= pos.amount - 0.00001:
                                     pos.status = "closed"
@@ -394,11 +475,11 @@ class BotManager:
                                 else:
                                     pos.amount -= close_qty
 
-                                print(f"✅ {mode.upper()} SELL ({close_reason}) Filled @ {actual_price}")
+                                print(f"✅ {mode.upper()} SELL ({ev['reason']}) Filled @ {actual_price}")
                             except Exception as e:
                                 db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=latest_time, status="rejected"))
 
-                    standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
+                    standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr']
                     indicators = { col: float(latest_row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(latest_row[col]) }
 
                     existing_signal = db.query(Signal).filter(Signal.bot_name == bot.name, Signal.symbol == symbol, Signal.timestamp == latest_time).first()

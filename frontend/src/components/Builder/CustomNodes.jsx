@@ -2,7 +2,60 @@ import React from 'react';
 import { Handle, Position } from 'reactflow';
 
 // ==========================================
-// 1. CONFIGURATIE BLOKKEN
+// 1. DE ULTIEME INDICATOR DICTIONARY
+// Hier definiëren we elke indicator met zijn specifieke settings!
+// ==========================================
+const INDICATOR_GROUPS = {
+    "Trend & Overlap": {
+        sma: { name: "SMA (Simple Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        ema: { name: "EMA (Exponential Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        wma: { name: "WMA (Weighted Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        macd: { name: "MACD", lines: ["MACD Line", "Histogram", "Signal Line"], params: [
+            {id: "fast", label: "Fast Length", default: 12},
+            {id: "slow", label: "Slow Length", default: 26},
+            {id: "signal", label: "Signal Length", default: 9}
+        ]},
+        adx: { name: "ADX (Average Directional Index)", lines: ["ADX", "DMP (+DI)", "DMN (-DI)"], params: [{id: "length", label: "Length", default: 14}] },
+        psar: { name: "Parabolic SAR", lines: ["Long", "Short", "AF", "Reversal"], params: [{id: "af0", label: "AF Step", default: 0.02}, {id: "af", label: "AF Max", default: 0.2}] },
+    },
+    "Momentum": {
+        rsi: { name: "RSI (Relative Strength Index)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        stoch: { name: "Stochastic Oscillator", lines: ["%K", "%D"], params: [
+            {id: "k", label: "%K Length", default: 14},
+            {id: "d", label: "%D Length", default: 3},
+            {id: "smooth_k", label: "Smooth %K", default: 3}
+        ]},
+        cci: { name: "CCI (Commodity Channel Index)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        mfi: { name: "MFI (Money Flow Index)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        roc: { name: "ROC (Rate of Change)", lines: ["Main"], params: [{id: "length", label: "Length", default: 10}] },
+        ao: { name: "Awesome Oscillator", lines: ["Main"], params: [{id: "fast", label: "Fast", default: 5}, {id: "slow", label: "Slow", default: 34}] },
+    },
+    "Volatility": {
+        bbands: { name: "Bollinger Bands", lines: ["Lower Band", "Mid Band", "Upper Band", "Bandwidth", "Percent"], params: [
+            {id: "length", label: "Length", default: 20},
+            {id: "std", label: "Std Dev", default: 2.0}
+        ]},
+        atr: { name: "ATR (Average True Range)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        kc: { name: "Keltner Channels", lines: ["Lower", "Mid", "Upper"], params: [
+            {id: "length", label: "Length", default: 20},
+            {id: "scalar", label: "Multiplier", default: 2.0}
+        ]},
+    },
+    "Volume": {
+        obv: { name: "On-Balance Volume (OBV)", lines: ["Main"], params: [] },
+        vwap: { name: "VWAP", lines: ["Main"], params: [] },
+        cmf: { name: "Chaikin Money Flow", lines: ["Main"], params: [{id: "length", label: "Length", default: 20}] },
+    }
+};
+
+// Flatten de dictionary om makkelijk te zoeken
+const FLAT_INDICATORS = {};
+Object.values(INDICATOR_GROUPS).forEach(group => {
+    Object.assign(FLAT_INDICATORS, group);
+});
+
+// ==========================================
+// CONFIGURATIE BLOKKEN
 // ==========================================
 
 export const BotConfigNode = ({ id, data }) => (
@@ -118,44 +171,103 @@ export const ApiKeyNode = ({ id, data }) => (
 );
 
 // ==========================================
-// 2. LOGICA & DATA BLOKKEN
+// 2. LOGICA & DATA BLOKKEN (MET DYNAMISCHE PARAMS)
 // ==========================================
 
-export const IndicatorNode = ({ id, data }) => (
-  <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-lg min-w-[220px] hover:border-[#fcd535] transition-colors relative">
+export const IndicatorNode = ({ id, data }) => {
+  const currentIndKey = data.indicator || "rsi";
+  const indDef = FLAT_INDICATORS[currentIndKey] || FLAT_INDICATORS.rsi;
+  const showDropdown = indDef.lines.length > 1;
+
+  // Haal de opgeslagen params op, of gebruik een lege dictionary
+  const currentParams = data.params || {};
+
+  const handleParamChange = (paramId, value) => {
+      const newParams = { ...currentParams, [paramId]: parseFloat(value) };
+      data.onChange(id, 'params', newParams);
+  };
+
+  return (
+  <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-lg min-w-[250px] hover:border-[#fcd535] transition-colors relative">
     <div className="bg-[#2b3139] px-3 py-2 flex justify-between items-center">
       <span className="font-bold text-[#eaecef] text-[11px] uppercase tracking-wider">TECHNICAL INDICATOR</span>
       {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
     </div>
     <div className="p-4 space-y-3 bg-[#0b0e11]/80 rounded-b">
-      <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={data.indicator || "rsi"} onChange={(e) => data.onChange(id, 'indicator', e.target.value)}>
-        <optgroup label="Oscillators">
-          <option value="rsi">RSI (Relative Strength)</option>
-          <option value="macd">MACD</option>
-          <option value="stoch">Stochastic</option>
-          <option value="cci">CCI (Commodity Channel)</option>
-          <option value="mfi">MFI (Money Flow Index)</option>
-          <option value="roc">ROC (Rate of Change)</option>
-        </optgroup>
-        <optgroup label="Moving Averages">
-          <option value="sma">SMA (Simple)</option>
-          <option value="ema">EMA (Exponential)</option>
-        </optgroup>
-        <optgroup label="Volatility">
-          <option value="bbands">Bollinger Bands</option>
-          <option value="atr">ATR (Average True Range)</option>
-        </optgroup>
+      
+      <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[11px] rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={currentIndKey} onChange={(e) => data.onChange(id, 'indicator', e.target.value)}>
+          {Object.entries(INDICATOR_GROUPS).map(([groupName, indicators]) => (
+              <optgroup key={groupName} label={groupName}>
+                  {Object.keys(indicators).map(key => (
+                      <option key={key} value={key}>{indicators[key].name}</option>
+                  ))}
+              </optgroup>
+          ))}
       </select>
-      <div className="flex items-center space-x-2 border-t border-[#2b3139] pt-3">
-        <span className="text-[10px] text-[#848e9c] font-bold uppercase w-12">Period</span>
-        <input type="number" className="flex-1 bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-1.5 nodrag text-right font-mono focus:border-[#fcd535] outline-none" value={data.period || 14} onChange={(e) => data.onChange(id, 'period', parseInt(e.target.value))} />
+
+      {/* DYNAMISCHE PARAMETER VELDEN OP BASIS VAN DE DICTIONARY */}
+      {indDef.params && indDef.params.length > 0 && (
+          <div className="border-t border-[#2b3139] pt-3 space-y-2">
+              {indDef.params.map(p => (
+                  <div key={p.id} className="flex items-center space-x-2">
+                    <span className="text-[10px] text-[#848e9c] font-bold uppercase flex-1">{p.label}</span>
+                    <input 
+                        type="number" 
+                        step="any"
+                        className="w-16 bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-1 nodrag text-right font-mono focus:border-[#fcd535] outline-none" 
+                        value={currentParams[p.id] !== undefined ? currentParams[p.id] : p.default} 
+                        onChange={(e) => handleParamChange(p.id, e.target.value)} 
+                    />
+                  </div>
+              ))}
+          </div>
+      )}
+
+      {showDropdown && (
+        <div className="border-t border-[#2b3139] pt-3 mt-3 animate-fade-in">
+          <label className="text-[9px] text-[#0ea5e9] font-bold uppercase mb-1.5 block">Signal Output (Multi-Line)</label>
+          <select className="w-full bg-[#181a20] border border-[#0ea5e9]/50 text-[#eaecef] text-[10px] rounded p-1.5 focus:border-[#0ea5e9] outline-none" value={data.outputIdx || 0} onChange={(e) => data.onChange(id, 'outputIdx', parseInt(e.target.value))}>
+            {indDef.lines.map((lineName, idx) => (
+                <option key={idx} value={idx}>{lineName} (Idx: {idx})</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+    </div>
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#fcd535] border-2 border-[#181a20]" />
+  </div>
+  );
+};
+
+export const PriceDataNode = ({ id, data }) => (
+  <div className="bg-[#181a20] border border-[#3b4149] rounded shadow-lg min-w-[220px] hover:border-[#fcd535] transition-colors relative">
+    <div className="bg-[#3b4149]/30 px-3 py-2 border-b border-[#3b4149]/50 flex justify-between items-center">
+      <span className="font-bold text-[#eaecef] text-[11px] uppercase tracking-wider">PRICE DATA</span>
+      {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
+    </div>
+    <div className="p-4 space-y-3 bg-[#0b0e11]/80 rounded-b">
+      <div>
+        <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Price Type</label>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={data.priceType || "close"} onChange={(e) => data.onChange(id, 'priceType', e.target.value)}>
+          <option value="open">Open</option>
+          <option value="high">High</option>
+          <option value="low">Low</option>
+          <option value="close">Close</option>
+        </select>
+      </div>
+      <div className="border-t border-[#2b3139] pt-3">
+         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Candle Offset</label>
+         <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={data.offset !== undefined ? data.offset : 0} onChange={(e) => data.onChange(id, 'offset', parseInt(e.target.value))}>
+            <option value={0}>Current (Live)</option>
+            <option value={1}>Previous (Closed)</option>
+         </select>
       </div>
     </div>
     <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#fcd535] border-2 border-[#181a20]" />
   </div>
 );
 
-// HIER IS DE NIEUWE CONDITION NODE (Logisch en overzichtelijk)
 export const ConditionNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#3b4149] rounded shadow-lg min-w-[260px] relative">
     <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-3 h-3 bg-[#0ea5e9] border-2 border-[#181a20]" />
@@ -177,6 +289,8 @@ export const ConditionNode = ({ id, data }) => (
           <option value="==">IS EQUAL TO (==)</option>
           <option value=">=">GREATER OR EQUAL (&gt;=)</option>
           <option value="<=">LESS OR EQUAL (&lt;=)</option>
+          <option value="cross_above">CROSSES ABOVE</option>
+          <option value="cross_below">CROSSES BELOW</option>
         </select>
       </div>
       <div className="flex items-center justify-between">
@@ -225,6 +339,9 @@ export const LogicNode = ({ id, data }) => {
 
 export const StopLossNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#f6465d] rounded shadow-lg min-w-[280px] relative">
+    
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#f6465d] border-2 border-[#181a20] -right-[6px]" />
+    
     <div className="bg-[#f6465d]/10 px-3 py-2 border-b border-[#f6465d]/30 flex justify-between items-center">
       <span className="font-bold text-[#f6465d] text-[11px] uppercase tracking-wider">STOP LOSS (RISK)</span>
       <div className="flex space-x-3 items-center">
@@ -256,12 +373,14 @@ export const StopLossNode = ({ id, data }) => (
         </div>
       </div>
     </div>
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#f6465d] border-2 border-[#181a20]" />
   </div>
 );
 
 export const TakeProfitNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#2ebd85] rounded shadow-lg min-w-[280px] relative">
+    
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#2ebd85] border-2 border-[#181a20] -right-[6px]" />
+
     <div className="bg-[#2ebd85]/10 px-3 py-2 border-b border-[#2ebd85]/30 flex justify-between items-center">
       <span className="font-bold text-[#2ebd85] text-[11px] uppercase tracking-wider">TAKE PROFIT (TARGET)</span>
       <div className="flex space-x-3 items-center">
@@ -291,7 +410,6 @@ export const TakeProfitNode = ({ id, data }) => (
         </div>
       </div>
     </div>
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-3 h-3 bg-[#2ebd85] border-2 border-[#181a20]" />
   </div>
 );
 
@@ -358,15 +476,16 @@ export const ActionNode = ({ id, data }) => {
          </div>
 
          {isBuy && (
-             <div className="relative border border-[#2b3139] rounded p-3 pt-4 pb-4">
+             <div className="relative border border-[#2b3139] rounded p-3 pt-4 pb-4 mt-2">
+                 
                  <Handle type="target" position={Position.Left} id="tp" className="w-3 h-3 bg-[#2ebd85] border-2 border-[#181a20] -left-[18px]" style={{ top: '30%' }} />
-                 <span className="absolute -left-6 top-[30%] -translate-y-1/2 text-[9px] font-bold text-[#2ebd85]">TP</span>
+                 <span className="absolute left-[-6px] top-[30%] -translate-y-1/2 text-[9px] font-bold text-[#2ebd85] -translate-x-full">TP</span>
                  
                  <Handle type="target" position={Position.Left} id="sl" className="w-3 h-3 bg-[#f6465d] border-2 border-[#181a20] -left-[18px]" style={{ top: '70%' }} />
-                 <span className="absolute -left-6 top-[70%] -translate-y-1/2 text-[9px] font-bold text-[#f6465d]">SL</span>
+                 <span className="absolute left-[-6px] top-[70%] -translate-y-1/2 text-[9px] font-bold text-[#f6465d] -translate-x-full">SL</span>
                  
                  <div className="text-[9px] text-[#848e9c] italic text-center leading-relaxed">
-                     Connect multiple Take Profit or Stop Loss blocks to the <span className="text-[#2ebd85] font-bold">TP</span> and <span className="text-[#f6465d] font-bold">SL</span> inputs to build advanced scaling-out strategies.
+                     Connect Take Profit or Stop Loss blocks to the <span className="text-[#2ebd85] font-bold">TP</span> and <span className="text-[#f6465d] font-bold">SL</span> ports on the left.
                  </div>
              </div>
          )}

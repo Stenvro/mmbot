@@ -92,7 +92,7 @@ export default function Settings({ setError }) {
       type: 'confirm',
       title: 'Delete Connection',
       message: `Are you sure you want to permanently delete the key '${delName}'?`,
-      confirmText: 'Delete',
+      confirmText: 'Delete Key',
       confirmColor: 'bg-[#f6465d] hover:bg-[#f6465d]/80 text-white',
       onConfirm: () => executeDelete(delName),
       onCancel: () => setModalConfig(null)
@@ -125,7 +125,6 @@ export default function Settings({ setError }) {
 
   const openSwapModal = async (kName) => {
       setSwapModal(kName);
-      // Zorg dat we de balance paraat hebben voor de MAX knop
       if (!balances[kName]) {
           try {
               const response = await apiClient.get(`/api/keys/${kName}/balance`);
@@ -134,7 +133,6 @@ export default function Settings({ setError }) {
       }
   };
 
-  // NIEUW: Max Knop Functionaliteit
   const handleMaxClick = () => {
       const walletBalances = balances[swapModal];
       if (!walletBalances || !walletBalances[swapFrom]) {
@@ -167,46 +165,38 @@ export default function Settings({ setError }) {
           setTimeout(async () => {
               try {
                   const response = await apiClient.get(`/api/keys/${swapModal}/balance`);
-                  setBalances(prev => ({
-                    ...prev,
-                    [swapModal]: response.data.balances
-                  }));
+                  setBalances(prev => ({ ...prev, [swapModal]: response.data.balances }));
               } catch (balanceErr) {}
           }, 1500);
           
       } catch (err) {
           setSwapModal(null);
-          setModalConfig({
-            type: 'error',
-            title: 'Swap Failed',
-            message: err.response?.data?.detail || err.message,
-            onConfirm: () => setModalConfig(null)
-          });
+          setModalConfig({ type: 'error', title: 'Swap Failed', message: err.response?.data?.detail || err.message, onConfirm: () => setModalConfig(null) });
       }
       setLoading(false);
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 w-full fade-in relative">
+    <div className="max-w-4xl mx-auto space-y-6 w-full fade-in relative pb-10">
       
       {modalConfig && (
         <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
           <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-sm w-full p-6 relative">
-            <h3 className={`text-lg font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
+            <h3 className={`text-sm font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>
               {modalConfig.title}
             </h3>
-            <p className="text-[#848e9c] text-sm mb-6 leading-relaxed">
+            <p className="text-[#848e9c] text-xs mb-6 leading-relaxed">
               {modalConfig.message}
             </p>
             <div className="flex justify-end space-x-3">
               {modalConfig.type === 'confirm' && (
-                <button onClick={modalConfig.onCancel} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">
+                <button onClick={modalConfig.onCancel} className="px-4 py-1.5 rounded text-[10px] font-bold text-[#848e9c] hover:text-[#eaecef] hover:bg-[#2b3139] transition-colors uppercase border border-transparent">
                   Cancel
                 </button>
               )}
               <button 
                 onClick={modalConfig.onConfirm} 
-                className={`px-4 py-2 rounded text-xs font-bold uppercase transition-colors ${modalConfig.confirmColor || 'bg-[#2ebd85] hover:bg-[#2ebd85]/80 text-[#181a20]'}`}
+                className={`px-4 py-1.5 rounded text-[10px] font-bold uppercase transition-colors ${modalConfig.confirmColor || 'bg-[#2ebd85]/10 text-[#2ebd85] hover:bg-[#2ebd85]/20 border border-[#2ebd85]/30'}`}
               >
                 {modalConfig.confirmText || 'OK'}
               </button>
@@ -218,37 +208,46 @@ export default function Settings({ setError }) {
       {swapModal && (
         <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
           <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-md w-full p-6 relative">
-            <h3 className="text-lg font-bold mb-1 uppercase tracking-wider text-[#eaecef]">Quick Swap / Trade</h3>
-            <p className="text-[#848e9c] text-xs mb-6">Executing on exchange via: <span className="text-[#0ea5e9] font-bold">{swapModal}</span></p>
+            <div className="flex justify-between items-center mb-6">
+                <div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-[#eaecef]">Market Execution</h3>
+                    <p className="text-[#848e9c] text-[10px] mt-0.5">Routing via: <span className="text-[#fcd535] font-bold">{swapModal}</span></p>
+                </div>
+                <button onClick={() => setSwapModal(null)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors font-bold">✕</button>
+            </div>
             
-            <form onSubmit={executeSwap} className="space-y-4">
+            <form onSubmit={executeSwap} className="space-y-5">
                 <div className="flex space-x-4">
                     <div className="w-1/2">
-                        <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">From Asset (Sell)</label>
-                        <input type="text" required value={swapFrom} onChange={e => setSwapFrom(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#f6465d] font-bold px-3 py-2 text-sm focus:outline-none focus:border-[#0ea5e9] rounded-sm" placeholder="USDC" />
+                        <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">From Asset (Sell)</label>
+                        <input type="text" required value={swapFrom} onChange={e => setSwapFrom(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] font-bold px-3 py-2 text-xs focus:outline-none focus:border-[#848e9c] rounded-sm transition-colors" placeholder="USDC" />
                     </div>
                     <div className="w-1/2">
-                        <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">To Asset (Buy)</label>
-                        <input type="text" required value={swapTo} onChange={e => setSwapTo(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#2ebd85] font-bold px-3 py-2 text-sm focus:outline-none focus:border-[#0ea5e9] rounded-sm" placeholder="SOL" />
+                        <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">To Asset (Buy)</label>
+                        <input type="text" required value={swapTo} onChange={e => setSwapTo(e.target.value.toUpperCase())} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] font-bold px-3 py-2 text-xs focus:outline-none focus:border-[#848e9c] rounded-sm transition-colors" placeholder="SOL" />
                     </div>
                 </div>
 
-                <div className="pt-2">
-                    <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Trade Size</label>
-                    <div className="flex bg-[#0b0e11] border border-[#2b3139] rounded-sm overflow-hidden">
-                        <select value={amountType} onChange={e => setAmountType(e.target.value)} className="bg-[#181a20] text-[#eaecef] text-xs px-2 py-2 border-r border-[#2b3139] outline-none cursor-pointer">
-                            <option value="from">Spend exactly ({swapFrom})</option>
-                            <option value="to">Receive exactly ({swapTo})</option>
+                <div>
+                    <div className="flex justify-between items-end mb-1.5">
+                        <label className="block text-[9px] font-bold uppercase text-[#848e9c]">Trade Size</label>
+                        {balances[swapModal] && balances[swapModal][swapFrom] && (
+                            <span className="text-[9px] text-[#848e9c] font-mono">Avail: {balances[swapModal][swapFrom].free.toFixed(4)} {swapFrom}</span>
+                        )}
+                    </div>
+                    <div className="flex bg-[#0b0e11] border border-[#2b3139] rounded-sm overflow-hidden focus-within:border-[#848e9c] transition-colors">
+                        <select value={amountType} onChange={e => setAmountType(e.target.value)} className="bg-[#181a20] text-[#848e9c] text-[10px] uppercase font-bold px-2 py-2 border-r border-[#2b3139] outline-none cursor-pointer hover:text-[#eaecef]">
+                            <option value="from">Spend ({swapFrom})</option>
+                            <option value="to">Receive ({swapTo})</option>
                         </select>
-                        <input type="number" step="any" required value={swapAmount} onChange={e => setSwapAmount(e.target.value)} className="w-full bg-transparent text-[#fcd535] font-mono px-3 py-2 text-sm focus:outline-none" placeholder="Amount..." />
-                        <button type="button" onClick={handleMaxClick} className="bg-[#2b3139] hover:bg-[#3b4149] text-[#fcd535] text-[10px] font-bold uppercase px-3 transition-colors border-l border-[#2b3139]">MAX</button>
+                        <input type="number" step="any" required value={swapAmount} onChange={e => setSwapAmount(e.target.value)} className="w-full bg-transparent text-[#eaecef] font-mono px-3 py-2 text-xs focus:outline-none" placeholder="0.00" />
+                        <button type="button" onClick={handleMaxClick} className="bg-[#2b3139] hover:bg-[#3b4149] text-[#eaecef] text-[9px] font-bold uppercase px-3 transition-colors border-l border-[#2b3139]">MAX</button>
                     </div>
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-6 border-t border-[#2b3139] mt-6">
-                    <button type="button" onClick={() => setSwapModal(null)} className="px-4 py-2 rounded text-xs font-bold text-[#848e9c] hover:bg-[#2b3139] transition-colors uppercase">Cancel</button>
-                    <button type="submit" disabled={loading} className="px-6 py-2 rounded text-xs font-bold uppercase transition-colors bg-[#0ea5e9] hover:bg-[#0ea5e9]/80 text-[#181a20] disabled:opacity-50">
-                        {loading ? 'Processing...' : 'Execute Market Swap'}
+                <div className="pt-4 border-t border-[#2b3139]">
+                    <button type="submit" disabled={loading} className="w-full py-2.5 rounded-sm text-xs font-bold uppercase tracking-wider transition-colors bg-[#eaecef] hover:bg-white text-[#181a20] disabled:opacity-50">
+                        {loading ? 'Processing...' : 'Execute Order'}
                     </button>
                 </div>
             </form>
@@ -257,61 +256,64 @@ export default function Settings({ setError }) {
       )}
 
       <div className="bg-[#181a20] border border-[#2b3139] p-5 rounded shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[#848e9c] text-xs font-bold uppercase tracking-wider">Saved API Connections</h3>
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-[#eaecef] text-sm font-bold uppercase tracking-wider">Exchange Connections</h3>
           <button 
             onClick={fetchKeys} 
             disabled={refreshing}
-            className="text-xs text-[#2ebd85] hover:text-[#2ebd85]/80 font-medium transition-colors border border-[#2ebd85]/30 px-3 py-1 rounded bg-[#2ebd85]/5"
+            className="text-[10px] text-[#848e9c] hover:text-[#eaecef] font-bold uppercase transition-colors border border-[#2b3139] hover:border-[#848e9c] px-3 py-1.5 rounded-sm bg-[#0b0e11]"
           >
-            {refreshing ? 'Checking...' : 'Refresh Status'}
+            {refreshing ? 'Syncing...' : 'Refresh Status'}
           </button>
         </div>
         
         {keys.length === 0 ? (
-          <p className="text-sm text-[#848e9c] italic">No exchange keys configured yet.</p>
+          <div className="p-6 text-center border border-[#2b3139] border-dashed rounded bg-[#0b0e11]/50">
+              <p className="text-xs text-[#848e9c] italic">No exchange keys configured. Add one below.</p>
+          </div>
         ) : (
           <div className="space-y-3">
             {keys.map((k, index) => (
-              <div key={index} className="flex flex-col bg-[#0b0e11] p-3 border border-[#2b3139] rounded-sm transition-all">
+              <div key={index} className="flex flex-col bg-[#0b0e11] p-4 border border-[#2b3139] rounded-sm transition-all hover:border-[#3b4149]">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col">
-                    <span className="text-[#eaecef] font-bold">{k.name}</span>
-                    <div className="flex items-center space-x-2 mt-1">
-                      <div className={`w-2 h-2 rounded-full ${k.is_active ? 'bg-[#2ebd85]' : 'bg-[#f6465d] animate-pulse'}`}></div>
-                      <span className="text-xs text-[#848e9c]">
-                        {k.exchange.toUpperCase()} - {k.is_sandbox ? 'Sandbox (Testnet)' : 'Live Market'}
+                    <span className="text-[#eaecef] font-bold text-sm">{k.name}</span>
+                    <div className="flex items-center space-x-2 mt-1.5">
+                      <div className={`w-1.5 h-1.5 rounded-full ${k.is_active ? 'bg-[#2ebd85]' : 'bg-[#f6465d] animate-pulse'}`}></div>
+                      <span className="text-[10px] text-[#848e9c] uppercase font-bold tracking-wider">
+                        {k.exchange} {k.is_sandbox ? 'SANDBOX' : 'LIVE'}
                       </span>
                       {!k.is_active && (
-                        <span className="text-xs text-[#f6465d] ml-2 bg-[#f6465d]/10 px-2 py-0.5 rounded cursor-help" title={k.error_msg}>
-                          Connection Failed
+                        <span className="text-[9px] text-[#f6465d] ml-2 border border-[#f6465d]/30 bg-[#f6465d]/10 px-1.5 py-0.5 rounded cursor-help" title={k.error_msg}>
+                          ERROR
                         </span>
                       )}
                     </div>
                   </div>
                   
-                  <div className="flex space-x-4 items-center">
+                  <div className="flex space-x-2 items-center">
                     {k.is_active && (
                       <>
                         <button 
                           onClick={() => openSwapModal(k.name)}
-                          className="text-[#0ea5e9] hover:text-[#0ea5e9]/80 text-xs font-bold uppercase transition-colors border border-[#0ea5e9]/30 px-3 py-1 rounded bg-[#0ea5e9]/10"
+                          className="text-[#eaecef] text-[10px] font-bold uppercase transition-colors border border-[#2b3139] hover:border-[#eaecef] hover:bg-[#2b3139] px-3 py-1.5 rounded-sm"
                         >
-                          Quick Swap
+                          Trade
                         </button>
                         <button 
                           onClick={() => handleFetchBalance(k.name)}
                           disabled={fetchingBalanceFor === k.name}
-                          className="text-[#fcd535] hover:text-[#e5c02a] text-sm font-medium transition-colors disabled:opacity-50"
+                          className="text-[#848e9c] hover:text-[#eaecef] text-[10px] font-bold uppercase transition-colors px-3 py-1.5 rounded-sm disabled:opacity-50"
                         >
-                          {fetchingBalanceFor === k.name ? 'Loading...' : balances[k.name] ? 'Hide Balance' : 'View Balance'}
+                          {fetchingBalanceFor === k.name ? '...' : balances[k.name] ? 'Hide Assets' : 'Assets'}
                         </button>
                       </>
                     )}
+                    <span className="text-[#2b3139]">|</span>
                     <button 
                       onClick={() => handleDeleteClick(k.name)} 
                       disabled={loading} 
-                      className="text-[#f6465d] hover:text-[#f6465d]/80 text-sm font-medium transition-colors"
+                      className="text-[#f6465d] hover:text-[#f6465d]/80 text-[10px] font-bold uppercase transition-colors px-2 py-1.5"
                     >
                       Delete
                     </button>
@@ -319,18 +321,17 @@ export default function Settings({ setError }) {
                 </div>
 
                 {balances[k.name] && (
-                  <div className="mt-4 pt-3 border-t border-[#2b3139]/50 animate-fade-in">
-                    <h4 className="text-[10px] text-[#848e9c] uppercase tracking-wider mb-2">Available Portfolio</h4>
+                  <div className="mt-4 pt-4 border-t border-[#2b3139]/50 animate-fade-in">
                     {Object.keys(balances[k.name]).length === 0 ? (
-                      <span className="text-sm text-[#848e9c]">Portfolio is empty.</span>
+                      <span className="text-xs text-[#848e9c] italic">Wallet is empty.</span>
                     ) : (
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {Object.entries(balances[k.name]).map(([coin, data]) => (
-                          <div key={coin} className="bg-[#181a20] p-2 rounded border border-[#2b3139]/50 flex flex-col">
-                            <span className="text-xs text-[#848e9c] font-bold">{coin}</span>
-                            <span className="text-sm text-[#eaecef] font-mono mt-0.5">{data.free.toFixed(4)}</span>
+                          <div key={coin} className="bg-[#181a20] p-3 rounded-sm border border-[#2b3139]/50 flex flex-col">
+                            <span className="text-[10px] text-[#848e9c] font-bold uppercase">{coin}</span>
+                            <span className="text-xs text-[#eaecef] font-mono mt-1">{data.free.toFixed(4)}</span>
                             {data.used > 0 && (
-                              <span className="text-[10px] text-[#fcd535] mt-1">In Orders: {data.used.toFixed(4)}</span>
+                              <span className="text-[9px] text-[#fcd535] mt-1 font-mono">In Orders: {data.used.toFixed(4)}</span>
                             )}
                           </div>
                         ))}
@@ -345,33 +346,34 @@ export default function Settings({ setError }) {
       </div>
 
       <div className="bg-[#181a20] border border-[#2b3139] p-5 rounded shadow-sm">
-        <h3 className="text-[#848e9c] text-xs font-bold mb-4 uppercase tracking-wider">Add New Exchange Key</h3>
-        <form onSubmit={handleSave} className="space-y-4">
-          <div>
-            <label className="block text-xs text-[#848e9c] mb-1.5">Connection Name</label>
-            <input type="text" required value={keyName} onChange={e => setKeyName(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" placeholder="e.g. Main Algo" />
+        <h3 className="text-[#eaecef] text-sm font-bold mb-5 uppercase tracking-wider">Configure API Key</h3>
+        <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="col-span-1 md:col-span-2">
+            <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Connection Name</label>
+            <input type="text" required value={keyName} onChange={e => setKeyName(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-xs focus:outline-none focus:border-[#848e9c] transition-colors rounded-sm" placeholder="e.g. Production Wallet" />
           </div>
           <div>
-            <label className="block text-xs text-[#848e9c] mb-1.5">API Key</label>
-            <input type="password" required value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" placeholder="Paste your API Key here" />
+            <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">API Key</label>
+            <input type="password" required value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-xs focus:outline-none focus:border-[#848e9c] transition-colors rounded-sm" placeholder="••••••••••••••••" />
           </div>
           <div>
-            <label className="block text-xs text-[#848e9c] mb-1.5">Secret Key</label>
-            <input type="password" required value={apiSecret} onChange={e => setApiSecret(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" placeholder="Paste your Secret Key here" />
+            <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Secret Key</label>
+            <input type="password" required value={apiSecret} onChange={e => setApiSecret(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-xs focus:outline-none focus:border-[#848e9c] transition-colors rounded-sm" placeholder="••••••••••••••••" />
           </div>
-          <div>
-            <label className="block text-xs text-[#848e9c] mb-1.5">Passphrase</label>
-            <input type="password" required value={passphrase} onChange={e => setPassphrase(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-sm focus:outline-none focus:border-[#fcd535] transition-colors rounded-sm" placeholder="Your OKX API Passphrase" />
+          <div className="col-span-1 md:col-span-2">
+            <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Passphrase</label>
+            <input type="password" required value={passphrase} onChange={e => setPassphrase(e.target.value)} className="w-full bg-[#0b0e11] border border-[#2b3139] text-[#eaecef] px-3 py-2 text-xs focus:outline-none focus:border-[#848e9c] transition-colors rounded-sm" placeholder="Your OKX API Passphrase" />
           </div>
-          <div className="flex items-center pt-2">
-            <input type="checkbox" id="sandbox" checked={isSandbox} onChange={e => setIsSandbox(e.target.checked)} className="w-4 h-4 accent-[#fcd535] bg-[#0b0e11] border-[#2b3139] rounded-sm cursor-pointer" />
-            <label htmlFor="sandbox" className="ml-2 text-sm text-[#eaecef] cursor-pointer">
-              Use Sandbox (Testnet) Environment
+          
+          <div className="col-span-1 md:col-span-2 flex items-center justify-between pt-4 border-t border-[#2b3139] mt-2">
+            <label className="flex items-center cursor-pointer group">
+                <input type="checkbox" checked={isSandbox} onChange={e => setIsSandbox(e.target.checked)} className="w-3.5 h-3.5 accent-[#fcd535] bg-[#0b0e11] border-[#2b3139] rounded-sm cursor-pointer" />
+                <span className="ml-2 text-xs text-[#848e9c] group-hover:text-[#eaecef] transition-colors font-bold uppercase tracking-wider">
+                  Sandbox Environment (Testnet)
+                </span>
             </label>
-          </div>
-          <div className="pt-4 border-t border-[#2b3139]">
-            <button type="submit" disabled={loading} className="w-full bg-[#fcd535] text-[#181a20] px-6 py-2.5 text-sm font-semibold hover:bg-[#e5c02a] disabled:opacity-50 transition-colors rounded-sm">
-              {loading ? 'Verifying...' : 'Verify & Save Securely'}
+            <button type="submit" disabled={loading} className="bg-[#fcd535] text-[#181a20] px-6 py-2 text-xs font-bold uppercase tracking-wider hover:bg-[#e5c02a] disabled:opacity-50 transition-colors rounded-sm shadow-sm">
+              {loading ? 'Verifying...' : 'Save Connection'}
             </button>
           </div>
         </form>

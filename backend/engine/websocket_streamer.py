@@ -1,6 +1,7 @@
 import asyncio
 import json
 import websockets
+import time
 import ccxt
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -20,20 +21,17 @@ class OKXStreamer:
 
     def _get_active_subscriptions(self) -> dict:
         db: Session = SessionLocal()
-        # FIX 1: We gebruiken nu een dictionary om ook de lookback_limit per symbool op te slaan!
         subs_dict = {} 
         try:
             active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
             for bot in active_bots:
                 settings = bot.settings or {}
-                
-                # FIX 2: Haal de volledige symbols lijst op in plaats van alleen de eerste string
                 symbols = settings.get("symbols", [])
                 if not symbols and settings.get("symbol"):
                     symbols = [settings.get("symbol")]
                     
                 timeframe = settings.get("timeframe")
-                lookback = int(settings.get("backtest_lookback", 500)) # Gebruik bot lookback, default naar 500
+                lookback = int(settings.get("backtest_lookback", 500))
                 
                 if symbols and timeframe:
                     for sym in symbols:
@@ -44,7 +42,6 @@ class OKXStreamer:
                         
                         sub_key = (f"candle{tf}", okx_inst_id)
                         
-                        # Als er meerdere bots op hetzelfde symbool zitten, pak de grootste lookback
                         if sub_key in subs_dict:
                             subs_dict[sub_key] = max(subs_dict[sub_key], lookback)
                         else:
@@ -58,61 +55,74 @@ class OKXStreamer:
         db: Session = SessionLocal()
 
         try:
-            # FIX 3: Loop door de dictionary en gebruik de custom lookback per symbool
             for (channel, inst_id), lookback_limit in subscriptions_dict.items():
                 symbol = inst_id.replace("-", "/")
                 timeframe = channel.replace("candle", "").lower()
                 tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
                 
-                # We berekenen de 'since' datum ALTIJD opnieuw op basis van de gevraagde lookback
-                # Dit voorkomt dat hij niet genoeg data ophaalt als je de lookback later verhoogt.
                 now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                since = now_ms - ((lookback_limit + 10) * tf_ms) # +10 voor wat veilige speling
+                # We berekenen hoe ver we terug in de tijd moeten
+                target_since = now_ms - ((lookback_limit + 10) * tf_ms)
                 
-                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching {lookback_limit} candles...")
-                    
-                while True:
+                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching {lookback_limit} candles backwards...")
+                
+                # --- FIX: ACHTERUIT PAGINEREN ---
+                current_end = now_ms
+                all_ohlcv = []
+                
+                while current_end > target_since:
                     try:
-                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=100)
+                        # We gebruiken 'until' om OKX te dwingen de historie te geven, ongeacht hoe oud!
+                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=100, params={'until': current_end})
                     except Exception as ex:
                         print(f"⚠️ Warning: Could not fetch {symbol} from OKX: {ex}")
                         break
                         
-                    if not ohlcv or len(ohlcv) <= 1:
+                    if not ohlcv or len(ohlcv) == 0:
                         break
+                        
+                    valid_ohlcv = [row for row in ohlcv if row[0] >= target_since]
+                    all_ohlcv.extend(valid_ohlcv)
                     
-                    start_dt = datetime.fromtimestamp(ohlcv[0][0] / 1000.0, tz=timezone.utc)
-                    end_dt = datetime.fromtimestamp(ohlcv[-1][0] / 1000.0, tz=timezone.utc)
+                    first_ts = ohlcv[0][0]
+                    if first_ts >= current_end: 
+                        break # Voorkom infinite loop als de exchange vastloopt
                     
-                    existing_candles = db.query(Candle.timestamp).filter(
-                        Candle.symbol == symbol, Candle.timeframe == timeframe,
-                        Candle.timestamp >= start_dt, Candle.timestamp <= end_dt
-                    ).all()
-                    
-                    existing_times = set()
-                    for c in existing_candles:
-                        ts = c[0]
-                        if ts.tzinfo is None:
-                            ts = ts.replace(tzinfo=timezone.utc)
-                        existing_times.add(ts)
-                    
-                    new_candles = []
-                    for data in ohlcv:
-                        dt = datetime.fromtimestamp(data[0] / 1000.0, tz=timezone.utc)
-                        if dt not in existing_times:
-                            new_candles.append(Candle(
-                                symbol=symbol, timeframe=timeframe, timestamp=dt,
-                                open=float(data[1]), high=float(data[2]), low=float(data[3]),
-                                close=float(data[4]), volume=float(data[5])
-                            ))
-                    
-                    if new_candles:
-                        db.bulk_save_objects(new_candles)
-                        db.commit()
-                    
-                    since = ohlcv[-1][0] + 1
-                    
-                print(f"✅ Sync complete for {symbol} ({timeframe}).")
+                    current_end = first_ts - 1 # Zet de nieuwe grens net voor de oudste kaars die we net vonden
+                    time.sleep(self.exchange.rateLimit / 1000)
+                
+                # Sorteer ze weer chronologisch
+                all_ohlcv.sort(key=lambda x: x[0])
+                # --------------------------------
+
+                if not all_ohlcv:
+                    continue
+
+                start_dt = datetime.fromtimestamp(all_ohlcv[0][0] / 1000.0, tz=timezone.utc)
+                end_dt = datetime.fromtimestamp(all_ohlcv[-1][0] / 1000.0, tz=timezone.utc)
+                
+                existing_candles = db.query(Candle.timestamp).filter(
+                    Candle.symbol == symbol, Candle.timeframe == timeframe,
+                    Candle.timestamp >= start_dt, Candle.timestamp <= end_dt
+                ).all()
+                
+                existing_times = {c[0].replace(tzinfo=timezone.utc) if c[0].tzinfo is None else c[0] for c in existing_candles}
+                
+                new_candles = []
+                for data in all_ohlcv:
+                    dt = datetime.fromtimestamp(data[0] / 1000.0, tz=timezone.utc)
+                    if dt not in existing_times:
+                        new_candles.append(Candle(
+                            symbol=symbol, timeframe=timeframe, timestamp=dt,
+                            open=float(data[1]), high=float(data[2]), low=float(data[3]),
+                            close=float(data[4]), volume=float(data[5])
+                        ))
+                
+                if new_candles:
+                    db.bulk_save_objects(new_candles)
+                    db.commit()
+                
+                print(f"✅ Sync complete for {symbol} ({timeframe}). Fetched {len(all_ohlcv)} rows.")
         except Exception as e:
             print(f"❌ Sync Error: {e}")
         finally:

@@ -37,24 +37,44 @@ def fetch_historical_data(
         end_ts = int(req.end_date.timestamp() * 1000)
 
         all_ohlcv = []
-        current_since = start_ts
+        
+        # --- FIX: ACHTERUIT PAGINEREN ---
+        # We beginnen bij de End Date en kruipen met blokken van 100 terug naar de Start Date
+        current_end = end_ts
 
-        while current_since < end_ts:
-            ohlcv = exchange.fetch_ohlcv(formatted_symbol, req.timeframe, since=current_since, limit=100)
-            if not ohlcv: break 
+        print(f"📥 Manual Sync: {formatted_symbol} ({req.timeframe}) - Fetching backwards...")
+
+        while current_end > start_ts:
+            # We gebruiken de 'until' parameter om aan OKX door te geven tot waar we data willen zien
+            ohlcv = exchange.fetch_ohlcv(formatted_symbol, req.timeframe, limit=100, params={'until': current_end})
             
-            valid_ohlcv = [row for row in ohlcv if row[0] <= end_ts]
+            if not ohlcv or len(ohlcv) == 0: 
+                break 
+            
+            # Filter de data zodat we niet per ongeluk verder terug gaan dan de start_ts
+            valid_ohlcv = [row for row in ohlcv if row[0] >= start_ts and row[0] <= current_end]
             all_ohlcv.extend(valid_ohlcv)
 
-            last_ts = ohlcv[-1][0]
-            if last_ts >= end_ts: break
+            # Pak de oudste kaars uit deze batch
+            first_ts = ohlcv[0][0]
+            
+            # Veiligheidscheck: Als de exchange vastloopt op dezelfde datum, stop de loop
+            if first_ts >= current_end: 
+                break 
                 
-            current_since = last_ts + 1
+            # Zet het nieuwe eindpunt precies vóór de oudste kaars die we net hebben opgehaald
+            current_end = first_ts - 1
+            
+            # Respecteer de API rate limits van OKX
             time.sleep(exchange.rateLimit / 1000)
 
         if not all_ohlcv:
             return {"message": "No data found for this period."}
         
+        # Omdat we achteruit hebben gehaald, staat de data nu omgekeerd. We sorteren het weer chronologisch.
+        all_ohlcv.sort(key=lambda x: x[0])
+        # --------------------------------
+
         min_ts = datetime.fromtimestamp(all_ohlcv[0][0] / 1000.0, tz=timezone.utc)
         max_ts = datetime.fromtimestamp(all_ohlcv[-1][0] / 1000.0, tz=timezone.utc)
 
@@ -65,7 +85,7 @@ def fetch_historical_data(
             Candle.timestamp <= max_ts
         ).all()
         
-        existing_times = {row[0].replace(tzinfo=timezone.utc) for row in existing_data if row[0]}
+        existing_times = {row[0].replace(tzinfo=timezone.utc) if row[0].tzinfo is None else row[0] for row in existing_data}
 
         new_candles = []
         for row in all_ohlcv:
@@ -82,6 +102,7 @@ def fetch_historical_data(
 
         return {"message": "Download complete.", "total_fetched": len(all_ohlcv), "new_saved": len(new_candles)}
     except Exception as e:
+        print(f"❌ Error in manual sync: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/summary")
@@ -105,7 +126,6 @@ def delete_data(symbol: str, timeframe: Optional[str] = None, before_date: Optio
         query = query.filter(Candle.timeframe == timeframe)
         
     if before_date:
-        # Zet de string van de frontend om in een Python datetime object
         try:
             date_limit = datetime.fromisoformat(before_date.replace('Z', '+00:00'))
             query = query.filter(Candle.timestamp < date_limit)
@@ -117,21 +137,19 @@ def delete_data(symbol: str, timeframe: Optional[str] = None, before_date: Optio
     return {"message": f"Deleted {deleted_count} historical candles."}
 
 @router.get("/candles/{symbol}")
-def get_candles(symbol: str, x_timeframe: str = Header(...), db: Session = Depends(get_db)):
+def get_candles(symbol: str, limit: Optional[int] = None, x_timeframe: str = Header(...), db: Session = Depends(get_db)):
     formatted_symbol = symbol.replace('-', '/').upper()
-    candles = db.query(Candle).filter(
-        Candle.symbol == formatted_symbol, Candle.timeframe == x_timeframe
-    ).order_by(Candle.timestamp.asc()).all()
-
+    query = db.query(Candle).filter(Candle.symbol == formatted_symbol, Candle.timeframe == x_timeframe).order_by(Candle.timestamp.desc())
+    if limit: query = query.limit(limit)
+    candles = query.all()
+    candles.reverse()
     return [{"time": int(c.timestamp.replace(tzinfo=timezone.utc).timestamp()), "open": c.open, "high": c.high, "low": c.low, "close": c.close, "value": c.volume} for c in candles]
 
-# --- NIEUW: MARKET INFO ENDPOINT VOOR DE HUD ---
 @router.get("/market-info/{symbol}")
 def get_market_info(symbol: str):
     try:
         formatted_symbol = symbol.replace('-', '/').upper()
         ticker = exchange.fetch_ticker(formatted_symbol)
-        
         return {
             "symbol": formatted_symbol,
             "last": ticker.get('last', 0),

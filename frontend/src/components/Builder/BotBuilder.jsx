@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import ReactFlow, { MiniMap, Controls, Background, useNodesState, useEdgesState, addEdge, ReactFlowProvider } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { BotConfigNode, WhitelistNode, BacktestNode, ApiKeyNode, IndicatorNode, ConditionNode, LogicNode, StopLossNode, TakeProfitNode, ActionNode } from './CustomNodes';
+import { BotConfigNode, WhitelistNode, BacktestNode, ApiKeyNode, IndicatorNode, ConditionNode, LogicNode, StopLossNode, TakeProfitNode, ActionNode, PriceDataNode } from './CustomNodes';
 import { apiClient } from '../../api/client';
 
 const nodeTypes = {
@@ -15,10 +15,16 @@ const nodeTypes = {
   stopLoss: StopLossNode,
   takeProfit: TakeProfitNode,
   action: ActionNode,
+  priceData: PriceDataNode,
 };
 
-// FIX 1: Kogelvrije unieke ID generator (nooit meer overlappende blokken!)
 const getId = () => `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+const parseSafeFloat = (val) => {
+    if (val === "" || val === undefined || val === null) return "";
+    const parsed = parseFloat(String(val).replace(',', '.'));
+    return isNaN(parsed) ? "" : parsed;
+};
 
 const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const reactFlowWrapper = useRef(null);
@@ -30,11 +36,15 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const [modalConfig, setModalConfig] = useState(null);
   const initRef = useRef(false);
 
-  // FIX 2: React Immutability. We maken nu een diepe kloon, zodat React exact ziet wat we updaten.
   const updateNodeData = useCallback((id, field, value) => {
+    let safeValue = value;
+    if (field === 'triggerValue' || field === 'closeValue') {
+        safeValue = parseSafeFloat(value);
+    }
+
     setNodes((nds) => nds.map((node) => {
         if (node.id === id) { 
-            return { ...node, data: { ...node.data, [field]: value } }; 
+            return { ...node, data: { ...node.data, [field]: safeValue } }; 
         }
         return node;
     }));
@@ -73,7 +83,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
     }
   }, [editingBot, updateNodeData, deleteNode, setNodes, setEdges]);
 
-  // FIX 3: Veilige update van availableKeys zonder de staat te slopen
   useEffect(() => {
       if (!initRef.current || availableKeys.length === 0) return;
       setNodes(nds => nds.map(n => {
@@ -97,12 +106,12 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
 
       const defaultData = { onChange: updateNodeData, onDelete: deleteNode };
       if (type === 'apiKey') defaultData.availableKeys = availableKeys;
-      if (type === 'indicator') { defaultData.indicator = 'rsi'; defaultData.period = 14; }
+      if (type === 'indicator') { defaultData.indicator = 'rsi'; defaultData.params = {length: 14}; defaultData.outputIdx = 0; }
+      if (type === 'priceData') { defaultData.priceType = 'close'; defaultData.offset = 0; }
       if (type === 'condition') { defaultData.operator = '>'; defaultData.rightValue = ''; }
       if (type === 'logic') defaultData.logicType = 'and';
       if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'paper'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; }
       if (type === 'whitelist') defaultData.pairs = 'BTC/USDT';
-      // HIER DE LOOKBACK DEFAULT AANGEPAST
       if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; defaultData.lookback = 150; }
       if (type === 'stopLoss' || type === 'takeProfit') { 
           defaultData.triggerType = 'percentage'; defaultData.triggerValue = ''; 
@@ -158,7 +167,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 api_execution: configNode.data.executionMode === 'exchange',
                 backtest_on_start: backtestNode ? backtestNode.data.runOnStart : false,
                 backtest_capital: backtestNode ? backtestNode.data.capital : 1000,
-                // HIER DE LOOKBACK PAYLOAD AANGEPAST
                 backtest_lookback: backtestNode ? (backtestNode.data.lookback || 150) : 150,
                 api_key_name: apiKeyNode ? apiKeyNode.data.apiKeyName : null,
                 trade_settings: {}, 
@@ -174,8 +182,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const exitNode = nodes.find(n => n.type === 'action' && n.data.actionType === 'sell');
 
         if (entryNode) {
-             const tpEdges = edges.filter(e => e.target === entryNode.id && e.targetHandle === 'tp');
-             const slEdges = edges.filter(e => e.target === entryNode.id && e.targetHandle === 'sl');
+             const tpEdges = edges.filter(e => e.target === entryNode.id && (e.targetHandle === 'tp' || nodes.find(n => n.id === e.source)?.type === 'takeProfit'));
+             const slEdges = edges.filter(e => e.target === entryNode.id && (e.targetHandle === 'sl' || nodes.find(n => n.id === e.source)?.type === 'stopLoss'));
 
              payload.settings.trade_settings.entry = {
                  order_type: entryNode.data.orderType,
@@ -212,7 +220,13 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
             if (!sourceNode) return null;
 
             if (sourceNode.type === 'indicator') {
-                payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: [sourceNode.data.period || 14] };
+                // --- FIX: Stuur de Dynamische Dictionary Dictionary naar de backend! ---
+                const params = sourceNode.data.params || { length: sourceNode.data.period || 14 };
+                payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: params, output_idx: sourceNode.data.outputIdx || 0 };
+                return sourceNode.id;
+            }
+            if (sourceNode.type === 'priceData') {
+                payload.settings.nodes[sourceNode.id] = { class: "price_data", type: sourceNode.data.priceType || "close", offset: sourceNode.data.offset || 0 };
                 return sourceNode.id;
             }
             if (sourceNode.type === 'condition') {
@@ -243,7 +257,12 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const traverseByEdge = (edge) => {
              const sourceNode = nodes.find(n => n.id === edge.source);
              if(!sourceNode) return null;
-             if (sourceNode.type === 'indicator') { payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: [sourceNode.data.period || 14] }; return sourceNode.id; }
+             if (sourceNode.type === 'indicator') { 
+                 const params = sourceNode.data.params || { length: sourceNode.data.period || 14 };
+                 payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: params, output_idx: sourceNode.data.outputIdx || 0 }; 
+                 return sourceNode.id; 
+             }
+             if (sourceNode.type === 'priceData') { payload.settings.nodes[sourceNode.id] = { class: "price_data", type: sourceNode.data.priceType || "close", offset: sourceNode.data.offset || 0 }; return sourceNode.id; }
              if (sourceNode.type === 'condition') { 
                  const leftEdge = edges.find(e => e.target === sourceNode.id && (e.targetHandle === 'left' || !e.targetHandle));
                  const rightEdge = edges.find(e => e.target === sourceNode.id && e.targetHandle === 'right');
@@ -325,6 +344,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
             <div className="space-y-3">
                 <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#2b3139] pb-1">2. Market Logic</span>
                 <div className="p-3 bg-[#0b0e11] border border-[#2b3139] rounded text-[11px] text-[#eaecef] font-bold cursor-grab hover:bg-[#2b3139]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'indicator')} draggable>Technical Indicator</div>
+                <div className="p-3 bg-[#0b0e11] border border-[#3b4149] rounded text-[11px] text-[#eaecef] font-bold cursor-grab hover:bg-[#3b4149]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'priceData')} draggable>Price Data</div>
                 <div className="p-3 bg-[#0b0e11] border border-[#3b4149] rounded text-[11px] text-[#eaecef] font-bold cursor-grab hover:bg-[#3b4149]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'condition')} draggable>Data Condition</div>
                 <div className="p-3 bg-[#0b0e11] border border-[#2ea043]/50 rounded text-[11px] text-[#2ea043] font-bold cursor-grab hover:bg-[#2ea043]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'logic')} draggable>Logic Gate (AND, OR, NOT)</div>
             </div>
