@@ -92,7 +92,8 @@ export default function BotManagerUI({ setError }) {
   };
 
   return (
-    <div className="max-w-6xl mx-auto w-full fade-in space-y-6 relative pb-10">
+    // FIX: pb-32 toegevoegd zodat de pagina op mobiel verder naar beneden scrollt!
+    <div className="max-w-6xl mx-auto w-full fade-in space-y-6 relative pb-32 md:pb-10">
       
       {modalConfig && (
         <div className="fixed inset-0 z-[999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">

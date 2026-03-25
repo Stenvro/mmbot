@@ -6,11 +6,10 @@ import Settings from './components/Settings';
 import BotManagerUI from './components/BotManagerUI';
 import TradeManager from './components/TradeManager';
 import BotBuilder from './components/Builder/BotBuilder';
-import Home from './components/Home'; // NIEUW
+import Home from './components/Home';
 import { apiClient } from './api/client';
 
 export default function App() {
-  // --- FIX: Start op de nieuwe home pagina ---
   const [activeView, setActiveView] = useState('home');
   const [openCharts, setOpenCharts] = useState([]);
   const [runningBots, setRunningBots] = useState([]);
@@ -19,8 +18,8 @@ export default function App() {
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingBot, setEditingBot] = useState(null);
 
-  // --- MOBIELE MENU FIX ---
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // --- FIX: Sidebar is nu standaard overal gesloten (false) ---
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const fetchRunningBots = async () => {
     try {
@@ -39,7 +38,8 @@ export default function App() {
     const handleOpenBuilder = (e) => {
         setEditingBot(e.detail || null); 
         setShowBuilder(true);
-        setMobileMenuOpen(false); // Sluit menu op mobiel als builder opent
+        // FIX: Sluit altijd, ongeacht schermgrootte
+        setSidebarOpen(false); 
     };
     
     window.addEventListener('open-builder', handleOpenBuilder);
@@ -56,7 +56,8 @@ export default function App() {
       setOpenCharts(prev => [...prev, { ...dataset, id: chartId }]);
     }
     setActiveView(chartId);
-    setMobileMenuOpen(false);
+    // FIX: Sluit altijd, ongeacht schermgrootte
+    setSidebarOpen(false); 
   };
 
   const openBotChart = (bot) => {
@@ -80,7 +81,8 @@ export default function App() {
     if (lastOpenedChartId) {
       setActiveView(lastOpenedChartId);
     }
-    setMobileMenuOpen(false);
+    // FIX: Sluit altijd, ongeacht schermgrootte
+    setSidebarOpen(false); 
   };
 
   const closeChart = (chartId, e) => {
@@ -89,84 +91,62 @@ export default function App() {
     if (activeView === chartId) {
       setActiveView('home');
     }
+    // FIX: Sluit altijd, ongeacht schermgrootte
+    setSidebarOpen(false); 
   };
 
-  // Functie om views te veranderen EN het mobiele menu te sluiten
+  // FIX: Deze functie dwingt het menu nu altijd dicht bij élke klik op een link!
   const navigateTo = (view) => {
       setActiveView(view);
-      setMobileMenuOpen(false);
+      setSidebarOpen(false); 
   };
 
   return (
-    <div className="flex h-screen bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30 relative overflow-hidden">
+    <div className="flex h-[100dvh] bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30 overflow-hidden relative">
       
-      {/* MOBIELE HAMBURGER KNOP */}
+      {/* ZWEVENDE HAMBURGER KNOP MOBIEL & DESKTOP */}
       <button 
-        className="md:hidden fixed top-3 right-4 z-[90] p-2 bg-[#181a20] border border-[#2b3139] rounded text-white"
-        onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+        className={`fixed top-3 left-4 z-[90] p-2 bg-[#181a20]/80 backdrop-blur border border-[#2b3139] hover:border-[#fcd535] rounded shadow-lg text-[#848e9c] hover:text-[#fcd535] transition-all duration-300 ${sidebarOpen ? 'opacity-0 pointer-events-none -translate-x-10' : 'opacity-100 translate-x-0'}`}
+        onClick={() => setSidebarOpen(true)}
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={mobileMenuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} /></svg>
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
 
-      {/* SIDEBAR (Responsive classes toegevoegd) */}
-      <div className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 transition-transform fixed md:static inset-y-0 left-0 z-[80] w-64 md:w-48 bg-[#181a20] border-r border-[#2b3139] flex flex-col shadow-2xl md:shadow-none`}>
-          <div className="p-4 border-b border-[#2b3139] bg-[#0b0e11]/30 cursor-pointer" onClick={() => navigateTo('home')}>
-            <h1 className="text-lg font-bold tracking-widest text-white">
-              APEX<span className="text-[#fcd535]">ALGO</span>
-            </h1>
-            <p className="text-[#848e9c] text-[9px] mt-0.5 uppercase tracking-wider">Engine</p>
-          </div>
-          
-          <nav className="flex-1 p-2 space-y-1 mt-2 overflow-y-auto">
-            <button onClick={() => navigateTo('settings')} className={`w-full text-left px-3 py-2 md:py-1.5 text-sm md:text-xs font-medium rounded transition-colors ${activeView === 'settings' ? 'bg-[#2b3139] text-white shadow-sm' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}>Exchange Settings</button>
-            <button onClick={() => navigateTo('bots')} className={`w-full text-left px-3 py-2 md:py-1.5 text-sm md:text-xs font-medium rounded transition-colors ${activeView === 'bots' ? 'bg-[#2b3139] text-white shadow-sm' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}>Trading Bots</button>
-            <button onClick={() => navigateTo('manager')} className={`w-full text-left px-3 py-2 md:py-1.5 text-sm md:text-xs font-medium rounded transition-colors ${activeView === 'manager' ? 'bg-[#2b3139] text-white shadow-sm' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}>Data Vault</button>
-            <button onClick={() => navigateTo('trades')} className={`w-full text-left px-3 py-2 md:py-1.5 text-sm md:text-xs font-medium rounded transition-colors ${activeView === 'trades' ? 'bg-[#2b3139] text-white shadow-sm' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}>Trade Analytics</button>
-            
-            {runningBots && runningBots.length > 0 && (
-              <div className="pt-4 pb-1 px-2 flex items-center">
-                <span className="w-1.5 h-1.5 bg-[#2ebd85] rounded-full mr-2 animate-pulse"></span>
-                <span className="text-[9px] font-bold text-[#848e9c] uppercase tracking-wider">Active Bots</span>
-              </div>
-            )}
-            {runningBots && runningBots.map(bot => (
-              <button key={`bot_${bot.id}`} onClick={() => openBotChart(bot)} className="w-full text-left px-3 py-2 md:py-1.5 text-sm md:text-xs font-medium text-[#eaecef] hover:bg-[#2b3139]/50 transition-colors rounded truncate">{bot.name}</button>
-            ))}
+      {/* OVERLAY VOOR MOBIEL (Sluit menu als je ernaast klikt) */}
+      {sidebarOpen && (
+         <div className="fixed inset-0 bg-black/60 z-[70] md:hidden fade-in" onClick={() => setSidebarOpen(false)}></div>
+      )}
 
-            {openCharts.length > 0 && (
-              <div className="pt-4 pb-1 px-2">
-                <span className="text-[9px] font-bold text-[#848e9c] uppercase tracking-wider">Open Charts</span>
-              </div>
-            )}
-            {openCharts.map(chart => (
-              <div key={chart.id} className={`flex items-center justify-between px-3 py-2 md:py-1.5 text-sm md:text-xs font-medium rounded transition-colors ${activeView === chart.id ? 'bg-[#2b3139] text-white shadow-sm' : 'text-[#848e9c] hover:bg-[#2b3139]/50 hover:text-white'}`}>
-                <button className="flex-1 text-left truncate" onClick={() => navigateTo(chart.id)}>{chart.symbol} <span className="text-[9px] text-[#fcd535] ml-1">{chart.timeframe}</span></button>
-                <button onClick={(e) => closeChart(chart.id, e)} className="text-[#848e9c] hover:text-[#f6465d] ml-1 px-2 py-1 md:px-1 transition-colors">✕</button>
-              </div>
-            ))}
-          </nav>
-      </div>
+      <Sidebar 
+        activeView={activeView} 
+        setActiveView={navigateTo} 
+        openCharts={openCharts} 
+        closeChart={closeChart} 
+        runningBots={runningBots}
+        openBotChart={openBotChart}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+      />
 
-      {/* Overlay to close menu on mobile when clicking outside */}
-      {mobileMenuOpen && <div className="fixed inset-0 bg-black/50 z-[70] md:hidden" onClick={() => setMobileMenuOpen(false)}></div>}
-
-      <div className="flex-1 flex flex-col overflow-hidden relative">
+      <div className={`flex-1 flex flex-col h-full overflow-hidden relative transition-all duration-300 ease-in-out ${sidebarOpen ? 'md:ml-64' : 'ml-0'}`}>
         
         {['manager', 'settings', 'bots', 'trades'].includes(activeView) && (
-          <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center px-4 md:px-6 shrink-0 pt-1 md:pt-0">
-            <h2 className="text-xs md:text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
-              {activeView === 'manager' ? 'Market Data Vault' : 
-               activeView === 'bots' ? 'Trading Algorithms' : 
-               activeView === 'trades' ? 'Trade Analytics' :
-               'Exchange Configuration'}
-            </h2>
+          <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center justify-between px-4 md:px-6 shrink-0">
+            <div className={`${!sidebarOpen ? 'ml-12 transition-all duration-300' : 'ml-0 transition-all duration-300'}`}>
+              <h2 className="text-xs md:text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
+                {activeView === 'manager' ? 'Market Data Vault' : 
+                 activeView === 'bots' ? 'Trading Algorithms' : 
+                 activeView === 'trades' ? 'Trade Analytics' :
+                 'Exchange Configuration'}
+              </h2>
+            </div>
           </header>
         )}
 
         {error && (
-          <div className="m-4 p-3 bg-[#f6465d]/10 border border-[#f6465d]/50 text-[#f6465d] text-xs md:text-sm rounded shadow-sm flex justify-between items-center shrink-0 z-50">
+          <div className="absolute top-16 left-1/2 transform -translate-x-1/2 p-3 bg-[#f6465d]/10 border border-[#f6465d]/50 text-[#f6465d] text-xs md:text-sm rounded shadow-2xl flex justify-between items-center z-[100] min-w-[300px]">
             <span>{error}</span>
-            <button className="text-[#f6465d] hover:text-white px-2" onClick={() => setError(null)}>✕</button>
+            <button className="text-[#f6465d] hover:text-white ml-4 font-bold" onClick={() => setError(null)}>✕</button>
           </div>
         )}
 
@@ -194,7 +174,7 @@ export default function App() {
 
           {openCharts.map(chart => (
             activeView === chart.id && (
-              <div key={chart.id} className="flex-1 w-full h-full relative border-t-0 border border-[#2b3139]">
+              <div key={chart.id} className="flex-1 w-full h-full relative border-t-0 border border-[#2b3139] fade-in">
                  <ChartEngine dataset={chart} />
               </div>
             )
@@ -204,7 +184,7 @@ export default function App() {
       </div>
 
       {showBuilder && (
-        <div className="absolute inset-0 z-[100] bg-[#0b0e11]">
+        <div className="absolute inset-0 z-[100] bg-[#0b0e11] fade-in">
            <BotBuilder closeBuilder={() => setShowBuilder(false)} editingBot={editingBot} />
         </div>
       )}
