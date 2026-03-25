@@ -251,17 +251,16 @@ export default function ChartEngine({ dataset }) {
         setLoading(true); 
         setErrorMsg(null); 
         const chart = createChart(chartContainerRef.current, { 
-          layout: { background: { type: 'solid', color: '#0b0e11' }, textColor: '#848e9c' }, 
-          grid: { vertLines: { color: '#1f2329' }, horzLines: { color: '#1f2329' } }, 
+          // --- APEXALGO DARK THEME ---
+          layout: { background: { type: 'solid', color: '#080a0f' }, textColor: '#7d8598' }, 
+          grid: { vertLines: { color: '#202532' }, horzLines: { color: '#202532' } }, 
           crosshair: { mode: 0 },  
           
-          // --- FIX: DE PRIJS NEEMT DE BOVENSTE 75% IN BESLAG ---
-          rightPriceScale: { borderColor: '#2b3139', autoScale: true, scaleMargins: { top: 0.1, bottom: 0.25 } }, 
+          rightPriceScale: { borderColor: '#202532', autoScale: true, scaleMargins: { top: 0.1, bottom: 0.25 } }, 
           
-          // --- FIX: OSCILLATORS EN VOLUME NEMEN DE ONDERSTE 25% IN BESLAG ---
-          leftPriceScale: { visible: true, borderColor: '#2b3139', autoScale: true, scaleMargins: { top: 0.8, bottom: 0 } },  
+          leftPriceScale: { visible: true, borderColor: '#202532', autoScale: true, scaleMargins: { top: 0.8, bottom: 0 } },  
           
-          timeScale: { borderColor: '#2b3139', timeVisible: true },  
+          timeScale: { borderColor: '#202532', timeVisible: true },  
           autoSize: true,  
         }); 
         chartRef.current = chart; 
@@ -435,7 +434,7 @@ export default function ChartEngine({ dataset }) {
 
             const priceLine = { 
                 price: pos.entry_price, 
-                color: isBacktest ? '#848e9c' : (pos.side === 'long' ? '#2ebd85' : '#f6465d'), 
+                color: isBacktest ? '#7d8598' : (pos.side === 'long' ? '#2ebd85' : '#f6465d'), 
                 lineWidth: 2, 
                 lineStyle: 2,  
                 axisLabelVisible: true, 
@@ -513,90 +512,91 @@ export default function ChartEngine({ dataset }) {
   }; 
 
   return ( 
-    <div className="flex flex-col w-full h-full bg-[#0b0e11] rounded overflow-hidden"> 
+    <div className="flex flex-col w-full h-full bg-[#080a0f] rounded-none overflow-hidden"> 
        
-      <div className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center justify-between px-4 shrink-0 relative z-30"> 
-        <div className="flex items-center space-x-6"> 
+      {/* 
+        FIX 1: pl-14 md:pl-16 zorgt dat de tekst ALTIJD opzij staat voor de hamburgerknop (zowel mobiel als desktop!)
+        Kleuren aangepast naar het strakke donkere thema
+      */}
+      <div className="h-14 bg-[#12151c] border-b border-[#202532] flex items-center justify-between pl-14 md:pl-16 pr-4 md:pr-6 shrink-0 relative z-30"> 
+        <div className="flex items-center space-x-3 md:space-x-6"> 
           <div className="flex flex-col"> 
             <div className="flex items-center space-x-2"> 
-              <span className="text-white font-bold tracking-wider">{dataset.symbol}</span> 
-
-              <span className="bg-[#2b3139] text-[#eaecef] text-[10px] px-1.5 py-0.5 rounded uppercase">{dataset.timeframe}</span> 
+              <span className="text-white font-bold tracking-wider text-xs md:text-sm">{dataset.symbol}</span> 
+              <span className="bg-[#202532] text-[#f1f3f5] text-[9px] md:text-[10px] px-1.5 py-0.5 rounded uppercase font-bold tracking-widest">{dataset.timeframe}</span> 
             </div> 
-
-            {marketInfo && <span className={`text-xs font-mono font-medium mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{formatNum(marketInfo.last)}</span>} 
+            {marketInfo && <span className={`text-[10px] md:text-xs font-mono font-medium mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{formatNum(marketInfo.last)}</span>} 
           </div> 
 
           {marketInfo && ( 
             <> 
-              <div className="hidden md:flex flex-col border-l border-[#2b3139] pl-6"> 
-                <span className="text-[#848e9c] text-[10px] uppercase">24h Change</span> 
-
+              <div className="hidden md:flex flex-col border-l border-[#202532] pl-6"> 
+                <span className="text-[#7d8598] text-[10px] uppercase">24h Change</span> 
                 <span className={`text-xs font-mono mt-0.5 ${marketInfo.change_24h >= 0 ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}>{formatChange(marketInfo.change_24h)}</span> 
               </div> 
-              <div className="hidden md:flex flex-col border-l border-[#2b3139] pl-6"> 
-                <span className="text-[#848e9c] text-[10px] uppercase">24h High</span> 
-                <span className="text-[#eaecef] text-xs font-mono mt-0.5">{formatNum(marketInfo.high_24h)}</span> 
+              <div className="hidden md:flex flex-col border-l border-[#202532] pl-6"> 
+                <span className="text-[#7d8598] text-[10px] uppercase">24h High</span> 
+                <span className="text-[#f1f3f5] text-xs font-mono mt-0.5">{formatNum(marketInfo.high_24h)}</span> 
               </div> 
-              <div className="hidden lg:flex flex-col border-l border-[#2b3139] pl-6"> 
-                <span className="text-[#848e9c] text-[10px] uppercase">24h Low</span> 
-                <span className="text-[#eaecef] text-xs font-mono mt-0.5">{formatNum(marketInfo.low_24h)}</span> 
+              <div className="hidden lg:flex flex-col border-l border-[#202532] pl-6"> 
+                <span className="text-[#7d8598] text-[10px] uppercase">24h Low</span> 
+                <span className="text-[#f1f3f5] text-xs font-mono mt-0.5">{formatNum(marketInfo.low_24h)}</span> 
               </div> 
-              <div className="hidden xl:flex flex-col border-l border-[#2b3139] pl-6"> 
-                <span className="text-[#848e9c] text-[10px] uppercase">24h Volume</span> 
-                <span className="text-[#eaecef] text-xs font-mono mt-0.5">{formatNum(marketInfo.vol_24h)}</span> 
+              <div className="hidden xl:flex flex-col border-l border-[#202532] pl-6"> 
+                <span className="text-[#7d8598] text-[10px] uppercase">24h Volume</span> 
+                <span className="text-[#f1f3f5] text-xs font-mono mt-0.5">{formatNum(marketInfo.vol_24h)}</span> 
               </div> 
             </> 
           )} 
         </div> 
 
-        <div className="flex items-center space-x-4 relative"> 
+        <div className="flex items-center space-x-2 md:space-x-4 relative"> 
 
-          <div className={`flex items-center space-x-2 px-3 py-1.5 rounded text-xs font-medium border ${isLiveStreamActive ? 'bg-[#2ebd85]/10 text-[#2ebd85] border-[#2ebd85]/30' : 'bg-[#fcd535]/10 text-[#fcd535] border-[#fcd535]/30'}`}> 
-
-            <div className={`w-2 h-2 rounded-full ${isLiveStreamActive ? 'bg-[#2ebd85] animate-pulse' : 'bg-[#fcd535]'}`}></div> 
-            <span className="hidden sm:inline">{isLiveStreamActive ? 'SYNCED: LIVE' : 'SYNCED: STATIC'}</span> 
+          {/* FIX 2: whitespace-nowrap forceert de "SYNCED: LIVE" tekst op één regel zonder hem te verbergen */}
+          <div className={`flex items-center space-x-1.5 md:space-x-2 px-2 py-1 md:px-3 md:py-1.5 rounded text-[8px] md:text-xs font-bold tracking-widest border ${isLiveStreamActive ? 'bg-[#2ebd85]/10 text-[#2ebd85] border-[#2ebd85]/30' : 'bg-[#fcd535]/10 text-[#fcd535] border-[#fcd535]/30'}`}> 
+            <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${isLiveStreamActive ? 'bg-[#2ebd85] animate-pulse' : 'bg-[#fcd535]'}`}></div> 
+            <span className="whitespace-nowrap">{isLiveStreamActive ? 'SYNCED: LIVE' : 'SYNCED: STATIC'}</span> 
           </div> 
 
-          <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 rounded bg-[#2b3139] hover:bg-[#3b4149] transition-colors border border-[#3b4149] flex items-center justify-center"> 
-            <svg className="w-5 h-5 text-[#eaecef]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg> 
+          <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 rounded-lg bg-[#202532] hover:bg-[#2b3139] transition-colors border border-[#202532] flex items-center justify-center ml-1 md:ml-0"> 
+            <svg className="w-4 h-4 md:w-5 md:h-5 text-[#f1f3f5]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg> 
           </button> 
 
           {showMenu && ( 
-            <div className="absolute top-12 right-0 w-80 bg-[#181a20] border border-[#2b3139] rounded shadow-xl py-2 z-50"> 
-              <div className="px-4 py-3 text-xs font-bold text-[#848e9c] uppercase border-b border-[#2b3139] mb-1">Algorithm Overlay</div> 
+            <div className="absolute top-12 right-0 w-[calc(100vw-2rem)] sm:w-80 max-h-[70vh] overflow-y-auto custom-scrollbar bg-[#12151c] border border-[#202532] rounded-xl shadow-2xl py-2 z-50"> 
+              <div className="px-4 py-3 text-xs font-bold text-[#7d8598] uppercase border-b border-[#202532] mb-1">Algorithm Overlay</div> 
               {Object.keys(botConfigs).length === 0 ? ( 
-                <div className="px-4 py-3 text-xs text-[#848e9c]">No algorithms active on this chart.</div> 
+                <div className="px-4 py-3 text-xs text-[#7d8598]">No algorithms active on this chart.</div> 
               ) : ( 
                 Object.keys(botConfigs).map(botName => { 
                   const config = botConfigs[botName]; 
                   const isExpanded = expandedMenuBot === botName; 
 
                   return ( 
-                    <div key={botName} className="border-b border-[#2b3139]/50 last:border-0 transition-colors"> 
-                      <button onClick={() => toggleMenuBot(botName)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#2b3139]/30 transition-colors"> 
-                        <div className="text-sm font-bold text-[#eaecef] flex items-center"> 
+                    <div key={botName} className="border-b border-[#202532]/50 last:border-0 transition-colors"> 
+                      <button onClick={() => toggleMenuBot(botName)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-[#202532]/50 transition-colors"> 
+                        <div className="text-xs md:text-sm font-bold text-[#f1f3f5] flex items-center"> 
                            <span className="w-1.5 h-1.5 rounded-full mr-2 bg-[#2ebd85]"></span>{botName} 
                         </div> 
-                        <svg className={`w-4 h-4 text-[#848e9c] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg> 
+                        <svg className={`w-4 h-4 text-[#7d8598] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg> 
                       </button> 
 
                       {isExpanded && ( 
-                        <div className="flex flex-col space-y-4 pl-8 pr-4 pb-4 bg-[#0b0e11]/50 border-l-2 border-[#2b3139] ml-4 mt-1"> 
+                        <div className="flex flex-col space-y-4 pl-6 md:pl-8 pr-4 pb-4 bg-[#080a0f]/50 border-l-2 border-[#202532] ml-4 mt-1"> 
                             <div className="flex flex-col space-y-2 mt-2"> 
-                                <span className="text-[10px] font-bold text-[#0ea5e9] uppercase tracking-wider">LIVE & PAPER MODE</span> 
-                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealTrades} onChange={() => toggleBotSetting(botName, 'showRealTrades')} /><span className="ml-2 text-xs text-[#eaecef]">Real Trades (T-B / T-S)</span></label> 
-                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showRealPositions} onChange={() => toggleBotSetting(botName, 'showRealPositions')} /><span className="ml-2 text-xs text-[#eaecef]">Real Position Line</span></label> 
+                                <span className="text-[9px] md:text-[10px] font-bold text-[#0ea5e9] uppercase tracking-wider">LIVE & PAPER MODE</span> 
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#202532] bg-[#080a0f]" checked={config.showRealTrades} onChange={() => toggleBotSetting(botName, 'showRealTrades')} /><span className="ml-2 text-xs text-[#f1f3f5]">Real Trades (T-B / T-S)</span></label> 
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#0ea5e9] rounded border-[#202532] bg-[#080a0f]" checked={config.showRealPositions} onChange={() => toggleBotSetting(botName, 'showRealPositions')} /><span className="ml-2 text-xs text-[#f1f3f5]">Real Position Line</span></label> 
                             </div> 
                             <div className="flex flex-col space-y-2"> 
-                                <span className="text-[10px] font-bold text-[#fcd535] uppercase tracking-wider">BACKTEST MODE</span> 
-                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestTrades} onChange={() => toggleBotSetting(botName, 'showBacktestTrades')} /><span className="ml-2 text-xs text-[#848e9c]">Historical Trades (T-B / T-S)</span></label> 
-                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showBacktestPositions} onChange={() => toggleBotSetting(botName, 'showBacktestPositions')} /><span className="ml-2 text-xs text-[#848e9c]">Historical Position Line</span></label> 
+                                <span className="text-[9px] md:text-[10px] font-bold text-[#fcd535] uppercase tracking-wider">BACKTEST MODE</span> 
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#202532] bg-[#080a0f]" checked={config.showBacktestTrades} onChange={() => toggleBotSetting(botName, 'showBacktestTrades')} /><span className="ml-2 text-xs text-[#7d8598]">Historical Trades (T-B / T-S)</span></label> 
+                                <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3 w-3 text-[#fcd535] rounded border-[#202532] bg-[#080a0f]" checked={config.showBacktestPositions} onChange={() => toggleBotSetting(botName, 'showBacktestPositions')} /><span className="ml-2 text-xs text-[#7d8598]">Historical Position Line</span></label> 
                             </div> 
-                            <div className="h-px bg-[#2b3139] w-full my-1"></div> 
-                            <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} /><span className="ml-2 text-xs text-[#eaecef] italic">Engine Thoughts (S-B / S-S)</span></label> 
+                            <div className="h-px bg-[#202532] w-full my-1"></div> 
+                            <label className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#2ebd85] rounded border-[#202532] bg-[#080a0f]" checked={config.showSignals} onChange={() => toggleBotSetting(botName, 'showSignals')} /><span className="ml-2 text-xs text-[#f1f3f5] italic">Engine Thoughts (S-B / S-S)</span></label> 
                             {Object.keys(config.indicators).map(indKey => ( 
-                                <label key={indKey} className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#2b3139] bg-[#0b0e11]" checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} /><span className="ml-2 text-xs text-[#eaecef]">Draw Line: {indKey}</span></label> 
+                                <label key={indKey} className="flex items-center cursor-pointer"><input type="checkbox" className="form-checkbox h-3.5 w-3.5 text-[#fcd535] rounded border-[#202532] bg-[#080a0f]" checked={config.indicators[indKey]} onChange={() => toggleIndicatorConfig(botName, indKey)} /><span className="ml-2 text-xs text-[#f1f3f5]">Draw Line: {indKey}</span></label> 
                             ))} 
                         </div> 
                       )} 
@@ -610,17 +610,17 @@ export default function ChartEngine({ dataset }) {
       </div> 
 
       <div className="flex-1 relative w-full h-full"> 
-        {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>} 
-        {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#0b0e11]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>} 
+        {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>} 
+        {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>} 
          
         {hoverData && !loading && !errorMsg && ( 
-          <div className="absolute top-3 left-3 z-10 bg-[#181a20]/80 backdrop-blur-sm border border-[#2b3139] p-2 rounded-sm text-xs font-mono pointer-events-none shadow-lg max-w-[80%] flex flex-wrap gap-y-2"> 
-            <div className="flex space-x-3 items-center flex-wrap gap-y-2"> 
-              <div className="flex space-x-1"><span className="text-[#848e9c]">O</span><span className={hoverData.open > hoverData.close ? 'text-[#f6465d]' : 'text-[#2ebd85]'}>{formatNum(hoverData.open)}</span></div> 
-              <div className="flex space-x-1"><span className="text-[#848e9c]">H</span><span className="text-[#eaecef]">{formatNum(hoverData.high)}</span></div> 
-              <div className="flex space-x-1"><span className="text-[#848e9c]">L</span><span className="text-[#eaecef]">{formatNum(hoverData.low)}</span></div> 
-              <div className="flex space-x-1"><span className="text-[#848e9c]">C</span><span className={hoverData.close >= hoverData.open ? 'text-[#2ebd85]' : 'text-[#f6465d]'}>{formatNum(hoverData.close)}</span></div> 
-              <div className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1"><span className="text-[#848e9c]">V</span><span className="text-[#eaecef]">{formatNum(hoverData.value)}</span></div> 
+          <div className="absolute top-2 left-2 md:top-3 md:left-3 z-10 bg-[#12151c]/80 backdrop-blur-sm border border-[#202532] p-1.5 md:p-2 rounded-lg text-[9px] md:text-xs font-mono pointer-events-none shadow-lg max-w-[95%] md:max-w-[80%] flex flex-wrap gap-y-1 md:gap-y-2"> 
+            <div className="flex space-x-2 md:space-x-3 items-center flex-wrap gap-y-1 md:gap-y-2"> 
+              <div className="flex space-x-1"><span className="text-[#7d8598]">O</span><span className={hoverData.open > hoverData.close ? 'text-[#f6465d]' : 'text-[#2ebd85]'}>{formatNum(hoverData.open)}</span></div> 
+              <div className="flex space-x-1"><span className="text-[#7d8598]">H</span><span className="text-[#f1f3f5]">{formatNum(hoverData.high)}</span></div> 
+              <div className="flex space-x-1"><span className="text-[#7d8598]">L</span><span className="text-[#f1f3f5]">{formatNum(hoverData.low)}</span></div> 
+              <div className="flex space-x-1"><span className="text-[#7d8598]">C</span><span className={hoverData.close >= hoverData.open ? 'text-[#2ebd85]' : 'text-[#f6465d]'}>{formatNum(hoverData.close)}</span></div> 
+              <div className="flex space-x-1 border-l border-[#202532] pl-2 md:pl-3 ml-1"><span className="text-[#7d8598]">V</span><span className="text-[#f1f3f5]">{formatNum(hoverData.value)}</span></div> 
                
               {Object.keys(botConfigs).map(botName => { 
                   const config = botConfigs[botName]; 
@@ -632,8 +632,8 @@ export default function ChartEngine({ dataset }) {
                       const val = botDataAtTime[indKey]; 
                       if (val === undefined) return null; 
                       return ( 
-                          <div key={`${botName}-${indKey}`} className="flex space-x-1 border-l border-[#2b3139] pl-3 ml-1 items-center"> 
-                              <span className="text-[#848e9c] text-[10px] uppercase">{indKey}</span><span className="text-[#fcd535]">{formatNum(val)}</span> 
+                          <div key={`${botName}-${indKey}`} className="flex space-x-1 border-l border-[#202532] pl-2 md:pl-3 ml-1 items-center"> 
+                              <span className="text-[#7d8598] text-[8px] md:text-[10px] uppercase">{indKey}</span><span className="text-[#fcd535]">{formatNum(val)}</span> 
                           </div> 
                       ); 
                   }); 
@@ -643,7 +643,7 @@ export default function ChartEngine({ dataset }) {
         )} 
 
         {hoverData && snappedTradeMap[hoverData.time] && snappedTradeMap[hoverData.time].length > 0 && ( 
-          <div className="absolute top-14 left-3 z-20 flex flex-col space-y-2 pointer-events-none"> 
+          <div className="absolute top-12 left-2 md:top-14 md:left-3 z-20 flex flex-col space-y-2 pointer-events-none max-w-[calc(100vw-1rem)] md:max-w-none"> 
             {snappedTradeMap[hoverData.time].map((trade, idx) => { 
                 const totalValue = trade.price * trade.amount; 
                 const isWin = trade.position ? trade.price >= trade.position.entry_price : true; 
@@ -651,43 +651,43 @@ export default function ChartEngine({ dataset }) {
                 const pnlAbs = trade.position ? ((trade.price - trade.position.entry_price) * trade.amount).toFixed(2) : "0.00"; 
 
                 return ( 
-                    <div key={idx} className={`bg-[#181a20]/95 backdrop-blur-md border p-3 rounded shadow-2xl flex flex-col min-w-[260px] ${trade.side === 'buy' ? 'border-[#0ea5e9]' : 'border-[#d946ef]'}`}> 
-                        <div className="flex justify-between items-center mb-2 pb-2 border-b border-[#2b3139]"> 
-                            <span className={`text-xs font-bold uppercase tracking-wider ${trade.side === 'buy' ? 'text-[#0ea5e9]' : 'text-[#d946ef]'}`}> 
+                    <div key={idx} className={`bg-[#12151c]/95 backdrop-blur-md border p-3 rounded-lg shadow-2xl flex flex-col min-w-[240px] md:min-w-[260px] ${trade.side === 'buy' ? 'border-[#0ea5e9]' : 'border-[#d946ef]'}`}> 
+                        <div className="flex justify-between items-center mb-2 pb-2 border-b border-[#202532]"> 
+                            <span className={`text-[10px] md:text-xs font-bold uppercase tracking-wider ${trade.side === 'buy' ? 'text-[#0ea5e9]' : 'text-[#d946ef]'}`}> 
                                 {trade.side === 'buy' ? 'ENTRY EXECUTION' : 'EXIT EXECUTION'} 
                             </span> 
-                            <span className="bg-[#2b3139] text-[#eaecef] text-[8px] px-1.5 py-0.5 rounded uppercase font-bold">{trade.mode}</span> 
+                            <span className="bg-[#202532] text-[#f1f3f5] text-[8px] px-1.5 py-0.5 rounded uppercase font-bold">{trade.mode}</span> 
                         </div> 
                         <div className="grid grid-cols-2 gap-y-3 gap-x-4"> 
                             <div className="flex flex-col"> 
-                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Price</span> 
-                                <span className="text-xs text-[#eaecef] font-mono">${formatNum(trade.price)}</span> 
+                                <span className="text-[8px] md:text-[9px] text-[#7d8598] uppercase font-bold">Price</span> 
+                                <span className="text-[10px] md:text-xs text-[#f1f3f5] font-mono">${formatNum(trade.price)}</span> 
                             </div> 
                             <div className="flex flex-col text-right"> 
-                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Size</span> 
-                                <span className="text-xs text-[#eaecef] font-mono">{formatCrypto(trade.amount)}</span> 
+                                <span className="text-[8px] md:text-[9px] text-[#7d8598] uppercase font-bold">Size</span> 
+                                <span className="text-[10px] md:text-xs text-[#f1f3f5] font-mono">{formatCrypto(trade.amount)}</span> 
                             </div> 
                              
                             <div className="flex flex-col"> 
-                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Total</span> 
-                                <span className="text-xs text-[#eaecef] font-mono">${formatNum(totalValue)}</span> 
+                                <span className="text-[8px] md:text-[9px] text-[#7d8598] uppercase font-bold">Total</span> 
+                                <span className="text-[10px] md:text-xs text-[#f1f3f5] font-mono">${formatNum(totalValue)}</span> 
                             </div> 
                             <div className="flex flex-col text-right"> 
-                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Type</span> 
-                                <span className="text-xs text-[#eaecef] uppercase">{trade.order_type || 'Market'}</span> 
+                                <span className="text-[8px] md:text-[9px] text-[#7d8598] uppercase font-bold">Type</span> 
+                                <span className="text-[10px] md:text-xs text-[#f1f3f5] uppercase">{trade.order_type || 'Market'}</span> 
                             </div> 
                              
                             {trade.side === 'sell' && trade.position && ( 
-                                <div className="flex flex-col col-span-2 pt-2 border-t border-[#2b3139]"> 
-                                    <span className="text-[9px] text-[#848e9c] uppercase font-bold mb-1">PnL</span> 
-                                    <div className="grid grid-cols-2 gap-2 bg-[#0b0e11] p-2 rounded border border-[#2b3139]"> 
+                                <div className="flex flex-col col-span-2 pt-2 border-t border-[#202532]"> 
+                                    <span className="text-[8px] md:text-[9px] text-[#7d8598] uppercase font-bold mb-1">PnL</span> 
+                                    <div className="grid grid-cols-2 gap-2 bg-[#080a0f] p-2 rounded-lg border border-[#202532]"> 
                                         <div className="flex flex-col"> 
-                                            <span className="text-[8px] text-[#848e9c] uppercase">Avg Entry</span> 
-                                            <span className="text-[10px] text-[#eaecef] font-mono">${formatNum(trade.position.entry_price)}</span> 
+                                            <span className="text-[8px] text-[#7d8598] uppercase">Avg Entry</span> 
+                                            <span className="text-[9px] md:text-[10px] text-[#f1f3f5] font-mono">${formatNum(trade.position.entry_price)}</span> 
                                         </div> 
                                         <div className="flex flex-col text-right"> 
-                                            <span className="text-[8px] text-[#848e9c] uppercase">Realized</span> 
-                                            <span className={`text-[10px] font-mono font-bold ${isWin ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}> 
+                                            <span className="text-[8px] text-[#7d8598] uppercase">Realized</span> 
+                                            <span className={`text-[9px] md:text-[10px] font-mono font-bold ${isWin ? 'text-[#2ebd85]' : 'text-[#f6465d]'}`}> 
                                                 {isWin ? '+' : ''}${pnlAbs} ({pnlPct}%) 
                                             </span> 
                                         </div> 
@@ -695,9 +695,9 @@ export default function ChartEngine({ dataset }) {
                                 </div> 
                             )} 
 
-                            <div className="flex flex-col col-span-2 pt-2 border-t border-[#2b3139]"> 
-                                <span className="text-[9px] text-[#848e9c] uppercase font-bold">Source</span> 
-                                <span className="text-xs text-[#fcd535] truncate">{trade.bot_name}</span> 
+                            <div className="flex flex-col col-span-2 pt-2 border-t border-[#202532]"> 
+                                <span className="text-[8px] md:text-[9px] text-[#7d8598] uppercase font-bold">Source</span> 
+                                <span className="text-[10px] md:text-xs text-[#fcd535] truncate">{trade.bot_name}</span> 
                             </div> 
                         </div> 
                     </div> 
