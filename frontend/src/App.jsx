@@ -10,16 +10,45 @@ import Home from './components/Home';
 import { apiClient } from './api/client';
 
 export default function App() {
-  const [activeView, setActiveView] = useState('home');
-  const [openCharts, setOpenCharts] = useState([]);
+  // --- FIX 1: Haal de actieve weergave uit de lokale opslag (of ga naar 'home') ---
+  const [activeView, setActiveView] = useState(() => {
+      return localStorage.getItem('apex_activeView') || 'home';
+  });
+
+  // --- FIX 2: Haal de open grafieken uit de lokale opslag ---
+  const [openCharts, setOpenCharts] = useState(() => {
+      const savedCharts = localStorage.getItem('apex_openCharts');
+      return savedCharts ? JSON.parse(savedCharts) : [];
+  });
+
   const [runningBots, setRunningBots] = useState([]);
   const [error, setError] = useState(null);
   
   const [showBuilder, setShowBuilder] = useState(false);
   const [editingBot, setEditingBot] = useState(null);
 
-  // --- FIX: Sidebar is nu standaard overal gesloten (false) ---
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
+
+  // --- FIX 3: Sla veranderingen direct op in je lokale opslag ---
+  useEffect(() => {
+      localStorage.setItem('apex_activeView', activeView);
+  }, [activeView]);
+
+  useEffect(() => {
+      localStorage.setItem('apex_openCharts', JSON.stringify(openCharts));
+  }, [openCharts]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setSidebarOpen(false);
+      } else {
+        setSidebarOpen(true);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const fetchRunningBots = async () => {
     try {
@@ -38,8 +67,7 @@ export default function App() {
     const handleOpenBuilder = (e) => {
         setEditingBot(e.detail || null); 
         setShowBuilder(true);
-        // FIX: Sluit altijd, ongeacht schermgrootte
-        setSidebarOpen(false); 
+        if (window.innerWidth < 768) setSidebarOpen(false); 
     };
     
     window.addEventListener('open-builder', handleOpenBuilder);
@@ -56,8 +84,7 @@ export default function App() {
       setOpenCharts(prev => [...prev, { ...dataset, id: chartId }]);
     }
     setActiveView(chartId);
-    // FIX: Sluit altijd, ongeacht schermgrootte
-    setSidebarOpen(false); 
+    if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
   const openBotChart = (bot) => {
@@ -81,8 +108,7 @@ export default function App() {
     if (lastOpenedChartId) {
       setActiveView(lastOpenedChartId);
     }
-    // FIX: Sluit altijd, ongeacht schermgrootte
-    setSidebarOpen(false); 
+    if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
   const closeChart = (chartId, e) => {
@@ -91,20 +117,19 @@ export default function App() {
     if (activeView === chartId) {
       setActiveView('home');
     }
-    // FIX: Sluit altijd, ongeacht schermgrootte
-    setSidebarOpen(false); 
+    if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
-  // FIX: Deze functie dwingt het menu nu altijd dicht bij élke klik op een link!
   const navigateTo = (view) => {
       setActiveView(view);
-      setSidebarOpen(false); 
+      if (window.innerWidth < 768) {
+          setSidebarOpen(false);
+      }
   };
 
   return (
     <div className="flex h-[100dvh] bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30 overflow-hidden relative">
       
-      {/* ZWEVENDE HAMBURGER KNOP MOBIEL & DESKTOP */}
       <button 
         className={`fixed top-3 left-4 z-[90] p-2 bg-[#181a20]/80 backdrop-blur border border-[#2b3139] hover:border-[#fcd535] rounded shadow-lg text-[#848e9c] hover:text-[#fcd535] transition-all duration-300 ${sidebarOpen ? 'opacity-0 pointer-events-none -translate-x-10' : 'opacity-100 translate-x-0'}`}
         onClick={() => setSidebarOpen(true)}
@@ -112,7 +137,6 @@ export default function App() {
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
 
-      {/* OVERLAY VOOR MOBIEL (Sluit menu als je ernaast klikt) */}
       {sidebarOpen && (
          <div className="fixed inset-0 bg-black/60 z-[70] md:hidden fade-in" onClick={() => setSidebarOpen(false)}></div>
       )}

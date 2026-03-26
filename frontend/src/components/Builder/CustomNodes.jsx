@@ -3,7 +3,6 @@ import { Handle, Position } from 'reactflow';
 
 // ==========================================
 // 1. DE ULTIEME INDICATOR DICTIONARY
-// Hier definiëren we elke indicator met zijn specifieke settings!
 // ==========================================
 const INDICATOR_GROUPS = {
     "Trend & Overlap": {
@@ -42,13 +41,14 @@ const INDICATOR_GROUPS = {
         ]},
     },
     "Volume": {
+        volume: { name: "Raw Volume", lines: ["Main"], params: [] },
+        vma: { name: "VMA (Volume Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
         obv: { name: "On-Balance Volume (OBV)", lines: ["Main"], params: [] },
         vwap: { name: "VWAP", lines: ["Main"], params: [] },
         cmf: { name: "Chaikin Money Flow", lines: ["Main"], params: [{id: "length", label: "Length", default: 20}] },
     }
 };
 
-// Flatten de dictionary om makkelijk te zoeken
 const FLAT_INDICATORS = {};
 Object.values(INDICATOR_GROUPS).forEach(group => {
     Object.assign(FLAT_INDICATORS, group);
@@ -70,14 +70,14 @@ export const BotConfigNode = ({ id, data }) => (
         <input 
           type="text" 
           className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none"
-          value={data.botName || "Apex Strategy Alpha"}
+          value={data.botName !== undefined ? data.botName : "Apex Strategy Alpha"}
           onChange={(e) => data.onChange(id, 'botName', e.target.value)}
         />
       </div>
       <div className="flex space-x-2">
         <div className="w-1/2">
             <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Data Interval</label>
-            <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.timeframe || "1m"} onChange={(e) => data.onChange(id, 'timeframe', e.target.value)}>
+            <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.timeframe !== undefined ? data.timeframe : "1m"} onChange={(e) => data.onChange(id, 'timeframe', e.target.value)}>
                 <option value="1m">1 Minute</option>
                 <option value="5m">5 Minutes</option>
                 <option value="15m">15 Minutes</option>
@@ -88,19 +88,19 @@ export const BotConfigNode = ({ id, data }) => (
         </div>
         <div className="w-1/2">
             <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Max Positions</label>
-            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.maxPositions || 1} onChange={(e) => data.onChange(id, 'maxPositions', parseInt(e.target.value))} />
+            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.maxPositions !== undefined ? data.maxPositions : 1} onChange={(e) => data.onChange(id, 'maxPositions', e.target.value === "" ? "" : parseInt(e.target.value))} />
         </div>
       </div>
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Position Limit Scope</label>
-        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.maxPositionsScope || "per_pair"} onChange={(e) => data.onChange(id, 'maxPositionsScope', e.target.value)}>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.maxPositionsScope !== undefined ? data.maxPositionsScope : "per_pair"} onChange={(e) => data.onChange(id, 'maxPositionsScope', e.target.value)}>
           <option value="per_pair">Per Pair (e.g. 1x BTC, 1x ETH)</option>
           <option value="global">Global (Total across wallet)</option>
         </select>
       </div>
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Live Execution Mode</label>
-        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode || "paper"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode !== undefined ? data.executionMode : "paper"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
           <option value="paper">Paper Trading (Simulated Execution)</option>
           <option value="exchange">Live Exchange (Requires API Key)</option>
         </select>
@@ -120,7 +120,7 @@ export const WhitelistNode = ({ id, data }) => (
       <textarea 
         className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#d946ef] outline-none min-h-[60px] resize-none font-mono"
         placeholder="BTC/USDT, ETH/USDT, SOL/USDT"
-        value={data.pairs || "BTC/USDT"}
+        value={data.pairs !== undefined ? data.pairs : "BTC/USDT"}
         onChange={(e) => data.onChange(id, 'pairs', e.target.value)}
       />
     </div>
@@ -141,11 +141,11 @@ export const BacktestNode = ({ id, data }) => (
       <div className="flex space-x-2 pt-2 border-t border-[#2b3139]">
         <div className="w-1/2">
             <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Start Capital</label>
-            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono text-center" value={data.capital || 1000} onChange={(e) => data.onChange(id, 'capital', parseFloat(e.target.value))} />
+            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono text-center" value={data.capital !== undefined ? data.capital : 1000} onChange={(e) => data.onChange(id, 'capital', e.target.value === "" ? "" : parseFloat(e.target.value))} />
         </div>
         <div className="w-1/2">
             <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Candles (Lookback)</label>
-            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono text-center" value={data.lookback || 150} onChange={(e) => data.onChange(id, 'lookback', parseInt(e.target.value))} />
+            <input type="number" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-mono text-center" value={data.lookback !== undefined ? data.lookback : 150} onChange={(e) => data.onChange(id, 'lookback', e.target.value === "" ? "" : parseInt(e.target.value))} />
         </div>
       </div>
     </div>
@@ -160,7 +160,7 @@ export const ApiKeyNode = ({ id, data }) => (
     </div>
     <div className="p-4 bg-[#0b0e11]/80 rounded-b">
       <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Select API Credentials</label>
-      <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={data.apiKeyName || ""} onChange={(e) => data.onChange(id, 'apiKeyName', e.target.value)}>
+      <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={data.apiKeyName !== undefined ? data.apiKeyName : ""} onChange={(e) => data.onChange(id, 'apiKeyName', e.target.value)}>
         <option value="" disabled>No key selected (Local Engine)</option>
         {data.availableKeys?.map(k => (
           <option key={k.name} value={k.name}>{k.name} ({k.is_sandbox ? 'Sandbox' : 'Live'})</option>
@@ -171,19 +171,19 @@ export const ApiKeyNode = ({ id, data }) => (
 );
 
 // ==========================================
-// 2. LOGICA & DATA BLOKKEN (MET DYNAMISCHE PARAMS)
+// 2. LOGICA & DATA BLOKKEN
 // ==========================================
 
 export const IndicatorNode = ({ id, data }) => {
-  const currentIndKey = data.indicator || "rsi";
+  const currentIndKey = data.indicator !== undefined ? data.indicator : "rsi";
   const indDef = FLAT_INDICATORS[currentIndKey] || FLAT_INDICATORS.rsi;
   const showDropdown = indDef.lines.length > 1;
 
-  // Haal de opgeslagen params op, of gebruik een lege dictionary
   const currentParams = data.params || {};
 
   const handleParamChange = (paramId, value) => {
-      const newParams = { ...currentParams, [paramId]: parseFloat(value) };
+      const parsed = value === "" ? "" : parseFloat(value);
+      const newParams = { ...currentParams, [paramId]: parsed };
       data.onChange(id, 'params', newParams);
   };
 
@@ -205,7 +205,6 @@ export const IndicatorNode = ({ id, data }) => {
           ))}
       </select>
 
-      {/* DYNAMISCHE PARAMETER VELDEN OP BASIS VAN DE DICTIONARY */}
       {indDef.params && indDef.params.length > 0 && (
           <div className="border-t border-[#2b3139] pt-3 space-y-2">
               {indDef.params.map(p => (
@@ -226,7 +225,7 @@ export const IndicatorNode = ({ id, data }) => {
       {showDropdown && (
         <div className="border-t border-[#2b3139] pt-3 mt-3 animate-fade-in">
           <label className="text-[9px] text-[#0ea5e9] font-bold uppercase mb-1.5 block">Signal Output (Multi-Line)</label>
-          <select className="w-full bg-[#181a20] border border-[#0ea5e9]/50 text-[#eaecef] text-[10px] rounded p-1.5 focus:border-[#0ea5e9] outline-none" value={data.outputIdx || 0} onChange={(e) => data.onChange(id, 'outputIdx', parseInt(e.target.value))}>
+          <select className="w-full bg-[#181a20] border border-[#0ea5e9]/50 text-[#eaecef] text-[10px] rounded p-1.5 focus:border-[#0ea5e9] outline-none" value={data.outputIdx !== undefined ? data.outputIdx : 0} onChange={(e) => data.onChange(id, 'outputIdx', parseInt(e.target.value))}>
             {indDef.lines.map((lineName, idx) => (
                 <option key={idx} value={idx}>{lineName} (Idx: {idx})</option>
             ))}
@@ -249,11 +248,12 @@ export const PriceDataNode = ({ id, data }) => (
     <div className="p-4 space-y-3 bg-[#0b0e11]/80 rounded-b">
       <div>
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Price Type</label>
-        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={data.priceType || "close"} onChange={(e) => data.onChange(id, 'priceType', e.target.value)}>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={data.priceType !== undefined ? data.priceType : "close"} onChange={(e) => data.onChange(id, 'priceType', e.target.value)}>
           <option value="open">Open</option>
           <option value="high">High</option>
           <option value="low">Low</option>
           <option value="close">Close</option>
+          <option value="volume">Volume</option>
         </select>
       </div>
       <div className="border-t border-[#2b3139] pt-3">
@@ -261,6 +261,7 @@ export const PriceDataNode = ({ id, data }) => (
          <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#fcd535] outline-none font-semibold" value={data.offset !== undefined ? data.offset : 0} onChange={(e) => data.onChange(id, 'offset', parseInt(e.target.value))}>
             <option value={0}>Current (Live)</option>
             <option value={1}>Previous (Closed)</option>
+            <option value={2}>2 Candles Ago</option>
          </select>
       </div>
     </div>
@@ -283,7 +284,7 @@ export const ConditionNode = ({ id, data }) => (
          <span className="text-[10px] text-[#0ea5e9] font-bold uppercase ml-1">Input A (Signal)</span>
       </div>
       <div className="flex justify-center border-y border-[#2b3139] py-2">
-        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag font-bold focus:border-[#fcd535] outline-none text-center" value={data.operator || ">"} onChange={(e) => data.onChange(id, 'operator', e.target.value)}>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag font-bold focus:border-[#fcd535] outline-none text-center" value={data.operator !== undefined ? data.operator : ">"} onChange={(e) => data.onChange(id, 'operator', e.target.value)}>
           <option value=">">IS GREATER THAN (&gt;)</option>
           <option value="<">IS LESS THAN (&lt;)</option>
           <option value="==">IS EQUAL TO (==)</option>
@@ -291,13 +292,15 @@ export const ConditionNode = ({ id, data }) => (
           <option value="<=">LESS OR EQUAL (&lt;=)</option>
           <option value="cross_above">CROSSES ABOVE</option>
           <option value="cross_below">CROSSES BELOW</option>
+          <option value="increasing">IS INCREASING (Up)</option>
+          <option value="decreasing">IS DECREASING (Down)</option>
         </select>
       </div>
-      <div className="flex items-center justify-between">
+      <div className={`flex items-center justify-between transition-opacity ${['increasing', 'decreasing'].includes(data.operator) ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
          <span className="text-[10px] text-[#d946ef] font-bold uppercase ml-1">Input B</span>
          <div className="flex items-center space-x-2">
            <span className="text-[9px] text-[#848e9c] font-bold">OR</span>
-           <input type="number" placeholder="Static Value" title="Connect a line to Input B or type a static number here." className="w-20 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-1.5 nodrag font-mono focus:border-[#fcd535] outline-none text-center" value={data.rightValue !== undefined ? data.rightValue : ""} onChange={(e) => data.onChange(id, 'rightValue', parseFloat(e.target.value))} />
+           <input type="number" placeholder="Static Value" title="Connect a line to Input B or type a static number here." className="w-20 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-1.5 nodrag font-mono focus:border-[#fcd535] outline-none text-center" value={data.rightValue !== undefined ? data.rightValue : ""} onChange={(e) => data.onChange(id, 'rightValue', e.target.value === "" ? "" : parseFloat(e.target.value))} disabled={['increasing', 'decreasing'].includes(data.operator)} />
          </div>
       </div>
     </div>
@@ -319,7 +322,7 @@ export const LogicNode = ({ id, data }) => {
         {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
       </div>
       <div className="p-4 bg-[#0b0e11]/80 rounded-b">
-        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-bold text-center focus:border-[#2ea043] outline-none" value={data.logicType || "and"} onChange={(e) => data.onChange(id, 'logicType', e.target.value)}>
+        <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-bold text-center focus:border-[#2ea043] outline-none" value={data.logicType !== undefined ? data.logicType : "and"} onChange={(e) => data.onChange(id, 'logicType', e.target.value)}>
           <option value="and">AND (Require Both)</option>
           <option value="or">OR (Require Either)</option>
           <option value="xor">XOR (Exclusive OR)</option>
@@ -353,23 +356,23 @@ export const StopLossNode = ({ id, data }) => (
       <div>
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Trigger Level (Loss)</label>
         <div className="flex space-x-2">
-            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] font-bold rounded p-2 nodrag focus:border-[#f6465d] outline-none" value={data.triggerType || "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
+            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] font-bold rounded p-2 nodrag focus:border-[#f6465d] outline-none" value={data.triggerType !== undefined ? data.triggerType : "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
                 <option value="percentage">Percentage (%)</option>
                 <option value="trailing">Trailing (%)</option>
                 <option value="atr">ATR Trailing (x)</option>
                 <option value="fixed">Fixed Price</option>
             </select>
-            <input type="number" placeholder={data.triggerType === 'atr' ? "Multiplier (e.g. 2.5)" : "Value"} className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#f6465d] text-xs rounded p-2 nodrag font-mono focus:border-[#f6465d] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', parseFloat(e.target.value))} />
+            <input type="number" placeholder={data.triggerType === 'atr' ? "Multiplier (e.g. 2.5)" : "Value"} className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#f6465d] text-xs rounded p-2 nodrag font-mono focus:border-[#f6465d] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
         </div>
       </div>
       <div className="pt-3 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Amount to Close</label>
         <div className="flex space-x-2">
-            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#f6465d] outline-none" value={data.closeType || "percentage"} onChange={(e) => data.onChange(id, 'closeType', e.target.value)}>
+            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#f6465d] outline-none" value={data.closeType !== undefined ? data.closeType : "percentage"} onChange={(e) => data.onChange(id, 'closeType', e.target.value)}>
                 <option value="percentage">% of Position</option>
                 <option value="fixed">Fixed Amount</option>
             </select>
-            <input type="number" placeholder="100" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-mono focus:border-[#f6465d] outline-none text-center" value={data.closeValue !== undefined ? data.closeValue : 100} onChange={(e) => data.onChange(id, 'closeValue', parseFloat(e.target.value))} />
+            <input type="number" placeholder="100" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-mono focus:border-[#f6465d] outline-none text-center" value={data.closeValue !== undefined ? data.closeValue : 100} onChange={(e) => data.onChange(id, 'closeValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
         </div>
       </div>
     </div>
@@ -392,21 +395,21 @@ export const TakeProfitNode = ({ id, data }) => (
       <div>
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Trigger Level (Profit)</label>
         <div className="flex space-x-2">
-            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#2ebd85] outline-none" value={data.triggerType || "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
+            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#2ebd85] outline-none" value={data.triggerType !== undefined ? data.triggerType : "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
                 <option value="percentage">Percentage (%)</option>
                 <option value="fixed">Fixed Price</option>
             </select>
-            <input type="number" placeholder="e.g. 10" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#2ebd85] text-xs rounded p-2 nodrag font-mono focus:border-[#2ebd85] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', parseFloat(e.target.value))} />
+            <input type="number" placeholder="e.g. 10" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#2ebd85] text-xs rounded p-2 nodrag font-mono focus:border-[#2ebd85] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
         </div>
       </div>
       <div className="pt-3 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Amount to Close</label>
         <div className="flex space-x-2">
-            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#2ebd85] outline-none" value={data.closeType || "percentage"} onChange={(e) => data.onChange(id, 'closeType', e.target.value)}>
+            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#2ebd85] outline-none" value={data.closeType !== undefined ? data.closeType : "percentage"} onChange={(e) => data.onChange(id, 'closeType', e.target.value)}>
                 <option value="percentage">% of Position</option>
                 <option value="fixed">Fixed Amount</option>
             </select>
-            <input type="number" placeholder="100" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-mono focus:border-[#2ebd85] outline-none text-center" value={data.closeValue !== undefined ? data.closeValue : 100} onChange={(e) => data.onChange(id, 'closeValue', parseFloat(e.target.value))} />
+            <input type="number" placeholder="100" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-mono focus:border-[#2ebd85] outline-none text-center" value={data.closeValue !== undefined ? data.closeValue : 100} onChange={(e) => data.onChange(id, 'closeValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
         </div>
       </div>
     </div>
@@ -438,14 +441,14 @@ export const ActionNode = ({ id, data }) => {
              <div className="flex space-x-2">
                 <div className="w-1/2">
                     <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Direction</label>
-                    <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-bold outline-none" style={{ color: color }} value={data.actionType || "buy"} onChange={(e) => data.onChange(id, 'actionType', e.target.value)}>
+                    <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag font-bold outline-none" style={{ color: color }} value={data.actionType !== undefined ? data.actionType : "buy"} onChange={(e) => data.onChange(id, 'actionType', e.target.value)}>
                         <option value="buy">BUY (Open)</option>
                         <option value="sell">SELL (Close)</option>
                     </select>
                 </div>
                 <div className="w-1/2">
                     <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Order Type</label>
-                    <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none focus:border-[#0ea5e9]" value={data.orderType || "market"} onChange={(e) => data.onChange(id, 'orderType', e.target.value)}>
+                    <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none focus:border-[#0ea5e9]" value={data.orderType !== undefined ? data.orderType : "market"} onChange={(e) => data.onChange(id, 'orderType', e.target.value)}>
                         <option value="market">Market</option>
                         <option value="limit">Limit</option>
                     </select>
@@ -456,22 +459,22 @@ export const ActionNode = ({ id, data }) => {
          <div className="grid grid-cols-2 gap-2">
             <div>
                 <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Slippage (%)</label>
-                <input type="number" step="0.01" className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none" value={data.slippage || 0.05} onChange={(e) => data.onChange(id, 'slippage', e.target.value)} />
+                <input type="number" step="0.01" className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none" value={data.slippage !== undefined ? data.slippage : 0.05} onChange={(e) => data.onChange(id, 'slippage', e.target.value === "" ? "" : parseFloat(e.target.value))} />
             </div>
             <div>
                 <label className="text-[9px] text-[#848e9c] font-bold uppercase mb-1 block">Trading Fee (%)</label>
-                <input type="number" step="0.01" className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none" value={data.fee || 0.1} onChange={(e) => data.onChange(id, 'fee', e.target.value)} />
+                <input type="number" step="0.01" className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none" value={data.fee !== undefined ? data.fee : 0.1} onChange={(e) => data.onChange(id, 'fee', e.target.value === "" ? "" : parseFloat(e.target.value))} />
             </div>
          </div>
 
          <div className="border border-[#2b3139] rounded p-3">
              <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">{isBuy ? 'Entry Size' : 'Amount to Close'}</label>
              <div className="flex space-x-2">
-                 <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none focus:border-[#0ea5e9]" value={data.amountType || "percentage"} onChange={(e) => data.onChange(id, 'amountType', e.target.value)}>
+                 <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag outline-none focus:border-[#0ea5e9]" value={data.amountType !== undefined ? data.amountType : "percentage"} onChange={(e) => data.onChange(id, 'amountType', e.target.value)}>
                      <option value="percentage">{isBuy ? '% of Capital' : '% of Position'}</option>
                      <option value="fixed">Fixed Amount</option>
                  </select>
-                 <input type="number" placeholder="100" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#0ea5e9] text-xs rounded p-2 nodrag text-center font-mono focus:border-[#0ea5e9] outline-none" value={data.amountValue !== undefined ? data.amountValue : 100} onChange={(e) => data.onChange(id, 'amountValue', parseFloat(e.target.value))} />
+                 <input type="number" placeholder="100" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#0ea5e9] text-xs rounded p-2 nodrag text-center font-mono focus:border-[#0ea5e9] outline-none" value={data.amountValue !== undefined ? data.amountValue : 100} onChange={(e) => data.onChange(id, 'amountValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
              </div>
          </div>
 

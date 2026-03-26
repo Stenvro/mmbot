@@ -135,7 +135,15 @@ export default function ChartEngine({ dataset }) {
              if (bot.settings && bot.settings.nodes) { 
                  Object.entries(bot.settings.nodes).forEach(([nodeId, node]) => { 
                      if (node.class === 'indicator') { 
-                         const suffix = node.params && node.params.length > 0 ? `_${node.params.join('_')}` : ''; 
+                         // CRUCIAL FIX: Handle both Array and Object params safely
+                         let suffix = '';
+                         if (node.params) {
+                             if (Array.isArray(node.params) && node.params.length > 0) {
+                                 suffix = `_${node.params.join('_')}`;
+                             } else if (typeof node.params === 'object' && Object.keys(node.params).length > 0) {
+                                 suffix = `_${Object.values(node.params).join('_')}`;
+                             }
+                         }
                          const indName = `${node.method.toUpperCase()}${suffix}`; 
                          newConfigs[bot.name].nodeMap[nodeId] = indName;  
                      } 
@@ -515,10 +523,10 @@ export default function ChartEngine({ dataset }) {
     <div className="flex flex-col w-full h-full bg-[#080a0f] rounded-none overflow-hidden"> 
        
       {/* 
-        FIX 1: pl-14 md:pl-16 zorgt dat de tekst ALTIJD opzij staat voor de hamburgerknop (zowel mobiel als desktop!)
+        FIX 1: pl-14 md:pl-20 zorgt dat de tekst ALTIJD opzij staat voor de hamburgerknop (zowel mobiel als desktop!)
         Kleuren aangepast naar het strakke donkere thema
       */}
-      <div className="h-14 bg-[#12151c] border-b border-[#202532] flex items-center justify-between pl-14 md:pl-16 pr-4 md:pr-6 shrink-0 relative z-30"> 
+      <div className="h-14 bg-[#12151c] border-b border-[#202532] flex items-center justify-between pl-14 md:pl-20 pr-4 md:pr-6 shrink-0 relative z-30"> 
         <div className="flex items-center space-x-3 md:space-x-6"> 
           <div className="flex flex-col"> 
             <div className="flex items-center space-x-2"> 
@@ -552,7 +560,7 @@ export default function ChartEngine({ dataset }) {
 
         <div className="flex items-center space-x-2 md:space-x-4 relative"> 
 
-          {/* FIX 2: whitespace-nowrap forceert de "SYNCED: LIVE" tekst op één regel zonder hem te verbergen */}
+          {/* FIX 2: whitespace-nowrap forceert de "SYNCED: LIVE" tekst op één regel zonder hem te verbergen (geen hidden tags meer!) */}
           <div className={`flex items-center space-x-1.5 md:space-x-2 px-2 py-1 md:px-3 md:py-1.5 rounded text-[8px] md:text-xs font-bold tracking-widest border ${isLiveStreamActive ? 'bg-[#2ebd85]/10 text-[#2ebd85] border-[#2ebd85]/30' : 'bg-[#fcd535]/10 text-[#fcd535] border-[#fcd535]/30'}`}> 
             <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${isLiveStreamActive ? 'bg-[#2ebd85] animate-pulse' : 'bg-[#fcd535]'}`}></div> 
             <span className="whitespace-nowrap">{isLiveStreamActive ? 'SYNCED: LIVE' : 'SYNCED: STATIC'}</span> 

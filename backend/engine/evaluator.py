@@ -13,38 +13,63 @@ class NodeEvaluator:
         
         for node_id, node in nodes.items():
             if node.get("class") == "indicator":
-                method = node.get("method")
-                params = node.get("params", [])
-                out_idx = int(node.get("output_idx", 0)) # Nieuwe Parameter!
+                method = str(node.get("method", "rsi")).lower()
+                params = node.get("params", {})
+                out_idx = int(node.get("output_idx", 0))
                 
+                # --- SPECIALE BEHANDELING VOOR RAW VOLUME & VMA ---
+                if method == "volume":
+                    self.df[node_id] = self.df['volume'] if 'volume' in self.df.columns else 0.0
+                    continue
+                elif method == "vma":
+                    # VMA is in pandas-ta simpelweg een SMA over het volume
+                    if 'volume' in self.df.columns:
+                        length = params.get('length', 14) if isinstance(params, dict) else 14
+                        self.df[node_id] = ta.sma(self.df['volume'], length=length)
+                    else:
+                        self.df[node_id] = 0.0
+                    continue
+
                 if hasattr(self.df.ta, method):
+                    res = None
                     try:
-                        if isinstance(params, list):
+                        if isinstance(params, list) and len(params) > 0:
                             res = getattr(self.df.ta, method)(*params)
-                        elif isinstance(params, dict):
+                        elif isinstance(params, dict) and len(params) > 0:
                             res = getattr(self.df.ta, method)(**params)
-                        else:
+                        elif isinstance(params, (int, float, str)):
                             res = getattr(self.df.ta, method)(params)
-                        
-                        # --- FIX: MULTI-LINE INDICATOR SELECTOR ---
-                        # Pandas-TA geeft bijv. voor MACD 3 kolommen terug. 
-                        # We pakken precies de kolom die de user in de Builder heeft gekozen.
-                        if isinstance(res, pd.DataFrame):
+                        else:
+                            res = getattr(self.df.ta, method)()
+                            
+                    except Exception as e:
+                        print(f"⚠️ Param-fout voor {method} ({params}). Activating Fallback: {e}")
+                        try:
+                            res = getattr(self.df.ta, method)()
+                        except Exception as e2:
+                            print(f"❌ Definitieve Error indicator {method}: {e2}")
+                            continue
+
+                    if res is None:
+                        continue
+
+                    if isinstance(res, pd.DataFrame):
+                        if not res.empty:
                             if out_idx < len(res.columns):
                                 self.df[node_id] = res.iloc[:, out_idx]
                             else:
-                                self.df[node_id] = res.iloc[:, 0] # Fallback
-                        else:
-                            self.df[node_id] = res
-                    except Exception as e:
-                        print(f"❌ Error calculating indicator {method}: {e}")
+                                self.df[node_id] = res.iloc[:, 0]
+                    else:
+                        self.df[node_id] = res
 
-        # Bereken ALTIJD de ATR voor de Stop Loss!
         try:
-            h = pd.to_numeric(self.df['high'], errors='coerce')
-            l = pd.to_numeric(self.df['low'], errors='coerce')
-            c = pd.to_numeric(self.df['close'], errors='coerce')
-            self.df['atr'] = ta.atr(h, l, c, length=14)
+            if 'high' in self.df and 'low' in self.df and 'close' in self.df:
+                h = pd.to_numeric(self.df['high'], errors='coerce')
+                l = pd.to_numeric(self.df['low'], errors='coerce')
+                c = pd.to_numeric(self.df['close'], errors='coerce')
+                self.df['atr'] = ta.atr(h, l, c, length=14)
+            else:
+                self.df['atr'] = 0.0
         except Exception:
             self.df['atr'] = 0.0
 
@@ -73,8 +98,16 @@ class NodeEvaluator:
 
         elif node_class == "condition":
             left_s = self.resolve_operand(node.get("left"))
-            right_s = self.resolve_operand(node.get("right"))
             op = node.get("operator")
+
+            # --- NIEUW: INCREASING & DECREASING ---
+            if op == "increasing":
+                return left_s > left_s.shift(1)
+            elif op == "decreasing":
+                return left_s < left_s.shift(1)
+
+            # Normale vergelijkingen met Input B
+            right_s = self.resolve_operand(node.get("right"))
 
             if op == "cross_above":
                 return (left_s.shift(1) <= right_s.shift(1)) & (left_s > right_s)
