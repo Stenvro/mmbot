@@ -61,19 +61,19 @@ class OKXStreamer:
                 tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
                 
                 now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                # We berekenen hoe ver we terug in de tijd moeten
+                # Bereken het exacte startpunt in het verleden
                 target_since = now_ms - ((lookback_limit + 10) * tf_ms)
                 
-                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching {lookback_limit} candles backwards...")
+                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching {lookback_limit} candles forwards...")
                 
-                # --- FIX: ACHTERUIT PAGINEREN ---
-                current_end = now_ms
+                # --- FIX: FORWARD PAGINATION ---
+                # Door 'since' te gebruiken forceert CCXT het archief-endpoint van OKX
+                current_since = target_since
                 all_ohlcv = []
                 
-                while current_end > target_since:
+                while current_since < now_ms and len(all_ohlcv) < (lookback_limit + 10):
                     try:
-                        # We gebruiken 'until' om OKX te dwingen de historie te geven, ongeacht hoe oud!
-                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=100, params={'until': current_end})
+                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=100, since=current_since)
                     except Exception as ex:
                         print(f"⚠️ Warning: Could not fetch {symbol} from OKX: {ex}")
                         break
@@ -81,18 +81,26 @@ class OKXStreamer:
                     if not ohlcv or len(ohlcv) == 0:
                         break
                         
-                    valid_ohlcv = [row for row in ohlcv if row[0] >= target_since]
+                    valid_ohlcv = [row for row in ohlcv if row[0] >= current_since]
+                    
+                    if not valid_ohlcv:
+                        break
+                        
                     all_ohlcv.extend(valid_ohlcv)
                     
-                    first_ts = ohlcv[0][0]
-                    if first_ts >= current_end: 
-                        break # Voorkom infinite loop als de exchange vastloopt
+                    # Zoek de allerlaatste (meest recente) kaars uit deze batch
+                    latest_ts = valid_ohlcv[-1][0]
                     
-                    current_end = first_ts - 1 # Zet de nieuwe grens net voor de oudste kaars die we net vonden
+                    if latest_ts >= now_ms: 
+                        break 
+                    
+                    # Schuif het vizier voor de volgende cycle naar 1 ms na de laatst gevonden kaars
+                    current_since = latest_ts + 1 
                     time.sleep(self.exchange.rateLimit / 1000)
                 
-                # Sorteer ze weer chronologisch
+                # Trim the data to exactly what we requested
                 all_ohlcv.sort(key=lambda x: x[0])
+                all_ohlcv = all_ohlcv[-(lookback_limit + 10):]
                 # --------------------------------
 
                 if not all_ohlcv:
@@ -155,7 +163,9 @@ class OKXStreamer:
                     await asyncio.sleep(2)
                     continue
                 
-                self._sync_historical_gaps(subs_dict)
+                # --- FIX: Dit zorgt dat de engine NIET vastloopt tijdens gigantische downloads ---
+                await asyncio.to_thread(self._sync_historical_gaps, subs_dict)
+                
                 args = [{"channel": c, "instId": i} for c, i in subs_dict.keys()]
 
                 async with websockets.connect(OKX_WS_URL) as ws:

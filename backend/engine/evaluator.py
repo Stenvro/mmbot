@@ -17,12 +17,10 @@ class NodeEvaluator:
                 params = node.get("params", {})
                 out_idx = int(node.get("output_idx", 0))
                 
-                # --- SPECIALE BEHANDELING VOOR RAW VOLUME & VMA ---
                 if method == "volume":
                     self.df[node_id] = self.df['volume'] if 'volume' in self.df.columns else 0.0
                     continue
                 elif method == "vma":
-                    # VMA is in pandas-ta simpelweg een SMA over het volume
                     if 'volume' in self.df.columns:
                         length = params.get('length', 14) if isinstance(params, dict) else 14
                         self.df[node_id] = ta.sma(self.df['volume'], length=length)
@@ -100,13 +98,11 @@ class NodeEvaluator:
             left_s = self.resolve_operand(node.get("left"))
             op = node.get("operator")
 
-            # --- NIEUW: INCREASING & DECREASING ---
             if op == "increasing":
                 return left_s > left_s.shift(1)
             elif op == "decreasing":
                 return left_s < left_s.shift(1)
 
-            # Normale vergelijkingen met Input B
             right_s = self.resolve_operand(node.get("right"))
 
             if op == "cross_above":
@@ -122,8 +118,14 @@ class NodeEvaluator:
             return pd.Series(False, index=self.df.index)
 
         elif node_class == "logic":
-            left_s = self.resolve_node(node.get("left")).astype(bool)
-            right_s = self.resolve_node(node.get("right")).astype(bool) if node.get("right") else pd.Series(False, index=self.df.index)
+            # --- FIX: Veilige Boolean omzetting voor complexe (geneste) logica! ---
+            left_resolved = self.resolve_node(node.get("left"))
+            right_resolved = self.resolve_node(node.get("right")) if node.get("right") else pd.Series(False, index=self.df.index)
+            
+            # Pandas vereist .astype(bool) of .fillna(False) als een node toevallig getallen doorgeeft
+            left_s = left_resolved.astype(bool) if isinstance(left_resolved, pd.Series) else pd.Series(bool(left_resolved), index=self.df.index)
+            right_s = right_resolved.astype(bool) if isinstance(right_resolved, pd.Series) else pd.Series(bool(right_resolved), index=self.df.index)
+            
             op = node.get("operator", "and").lower()
 
             if op == "and": return left_s & right_s

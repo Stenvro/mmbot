@@ -31,7 +31,7 @@ export default function Home({ setActiveView }) {
                     <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-widest text-white drop-shadow-lg mb-3">
                         APEX<span className="text-[#fcd535]">ALGO</span>
                     </h1>
-                    <p className="text-[#0ea5e9] text-[10px] sm:text-xs md:text-sm font-mono tracking-[0.25em] uppercase">Quantitative Trading Engine v3.0</p>
+                    <p className="text-[#0ea5e9] text-[10px] sm:text-xs md:text-sm font-mono tracking-[0.25em] uppercase">Quantitative Trading Engine v1.24.6</p>
                 </div>
 
                 <p className="text-[#7d8598] text-sm sm:text-base md:text-lg mb-12 max-w-2xl leading-relaxed px-4">

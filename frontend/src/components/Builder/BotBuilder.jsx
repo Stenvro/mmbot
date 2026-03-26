@@ -20,6 +20,8 @@ const nodeTypes = {
 
 const getId = () => `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+// FIX: Veilige parser die alleen de trigger/close values hard forceert naar numbers, 
+// maar strings met rust laat voor de rest.
 const parseSafeFloat = (val) => {
     if (val === "" || val === undefined || val === null) return "";
     const parsed = parseFloat(String(val).replace(',', '.'));
@@ -34,14 +36,13 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const [availableKeys, setAvailableKeys] = useState([]);
   
   const [modalConfig, setModalConfig] = useState(null);
-  
-  // --- NIEUW VOOR MOBIEL ---
   const [toolboxOpen, setToolboxOpen] = useState(false); 
   
   const initRef = useRef(false);
 
   const updateNodeData = useCallback((id, field, value) => {
     let safeValue = value;
+    // Forceer alleen floating numbers voor risk blocks.
     if (field === 'triggerValue' || field === 'closeValue') {
         safeValue = parseSafeFloat(value);
     }
@@ -71,6 +72,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         }));
     }).catch(() => {});
 
+    // FIX: Zorg dat bestaande bots goed worden geparseerd, inclusief geneste data!
     if (editingBot && editingBot.settings.ui_layout) {
         const restoredNodes = editingBot.settings.ui_layout.nodes.map(n => ({
             ...n, data: { ...n.data, onChange: updateNodeData, onDelete: deleteNode }
@@ -100,7 +102,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#848e9c', strokeWidth: 2 } }, eds)), [setEdges]);
   const onDragOver = useCallback((event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
 
-  // --- HELPER FUNCTIE VOOR DRAG & DROP EN MOBIELE TAP ---
   const getDefaultData = (type) => {
       const defaultData = { onChange: updateNodeData, onDelete: deleteNode };
       if (type === 'apiKey') defaultData.availableKeys = availableKeys;
@@ -144,7 +145,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  // --- NIEUWE FUNCTIE VOOR MOBIEL (Tap to Add) ---
   const handleAddNodeMobile = (type) => {
       if (window.innerWidth >= 768) return; 
       const position = reactFlowInstance 
@@ -172,6 +172,15 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const symbolsList = whitelistNode.data.pairs.split(',').map(s => s.trim()).filter(s => s.length > 0);
         if (symbolsList.length === 0) return showError("Whitelist must contain at least one pair.");
 
+        // We ontdoen de nodes van functies en keys voor opslag
+        const uiNodesSafe = nodes.map(n => {
+            const safeNode = { ...n, data: { ...n.data } };
+            delete safeNode.data.onChange;
+            delete safeNode.data.onDelete;
+            delete safeNode.data.availableKeys;
+            return safeNode;
+        });
+
         const payload = {
             name: configNode.data.botName || "Untitled Algorithm",
             is_active: false,
@@ -190,11 +199,23 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 trade_settings: {}, 
                 nodes: {},
                 ui_layout: {
-                    nodes: nodes.map(n => ({ ...n, data: { ...n.data, onChange: null, onDelete: null, availableKeys: null } })), 
+                    nodes: uiNodesSafe, 
                     edges: edges
                 }
             }
         };
+
+        // --- FIX: Forceer ALLE indicatoren in payload, ongeacht verbinding ---
+        nodes.forEach(n => {
+            if (n.type === 'indicator') {
+                payload.settings.nodes[n.id] = { 
+                    class: "indicator", 
+                    method: n.data.indicator || 'rsi', 
+                    params: n.data.params || { length: 14 }, 
+                    output_idx: n.data.outputIdx || 0 
+                };
+            }
+        });
 
         const entryNode = nodes.find(n => n.type === 'action' && n.data.actionType === 'buy');
         const exitNode = nodes.find(n => n.type === 'action' && n.data.actionType === 'sell');
@@ -204,29 +225,29 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
              const slEdges = edges.filter(e => e.target === entryNode.id && (e.targetHandle === 'sl' || nodes.find(n => n.id === e.source)?.type === 'stopLoss'));
 
              payload.settings.trade_settings.entry = {
-                 order_type: entryNode.data.orderType,
-                 amount_type: entryNode.data.amountType,
-                 amount_value: entryNode.data.amountValue,
-                 fee: entryNode.data.fee || 0.1,
-                 slippage: entryNode.data.slippage || 0.05,
+                 order_type: entryNode.data.orderType || 'market',
+                 amount_type: entryNode.data.amountType || 'percentage',
+                 amount_value: entryNode.data.amountValue !== undefined && entryNode.data.amountValue !== "" ? entryNode.data.amountValue : 100,
+                 fee: entryNode.data.fee !== undefined && entryNode.data.fee !== "" ? entryNode.data.fee : 0.1,
+                 slippage: entryNode.data.slippage !== undefined && entryNode.data.slippage !== "" ? entryNode.data.slippage : 0.05,
                  take_profits: tpEdges.map(e => {
                      const n = nodes.find(nd => nd.id === e.source);
-                     return { type: n.data.triggerType, value: n.data.triggerValue, close_amount_type: n.data.closeType, close_amount_value: n.data.closeValue };
+                     return { type: n.data.triggerType, value: parseFloat(n.data.triggerValue) || 0, close_amount_type: n.data.closeType, close_amount_value: parseFloat(n.data.closeValue) || 100 };
                  }),
                  stop_losses: slEdges.map(e => {
                      const n = nodes.find(nd => nd.id === e.source);
-                     return { type: n.data.triggerType, value: n.data.triggerValue, close_amount_type: n.data.closeType, close_amount_value: n.data.closeValue };
+                     return { type: n.data.triggerType, value: parseFloat(n.data.triggerValue) || 0, close_amount_type: n.data.closeType, close_amount_value: parseFloat(n.data.closeValue) || 100 };
                  })
              };
         }
         
         if (exitNode) {
             payload.settings.trade_settings.exit = {
-                order_type: exitNode.data.orderType,
-                amount_type: exitNode.data.amountType,
-                amount_value: exitNode.data.amountValue,
-                fee: exitNode.data.fee || 0.1,
-                slippage: exitNode.data.slippage || 0.05
+                order_type: exitNode.data.orderType || 'market',
+                amount_type: exitNode.data.amountType || 'percentage',
+                amount_value: exitNode.data.amountValue !== undefined && exitNode.data.amountValue !== "" ? exitNode.data.amountValue : 100,
+                fee: exitNode.data.fee !== undefined && exitNode.data.fee !== "" ? exitNode.data.fee : 0.1,
+                slippage: exitNode.data.slippage !== undefined && exitNode.data.slippage !== "" ? exitNode.data.slippage : 0.05
             };
         }
 
@@ -239,7 +260,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
 
             if (sourceNode.type === 'indicator') {
                 const params = sourceNode.data.params || { length: sourceNode.data.period || 14 };
-                payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: params, output_idx: sourceNode.data.outputIdx || 0 };
+                payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator || 'rsi', params: params, output_idx: sourceNode.data.outputIdx || 0 };
                 return sourceNode.id;
             }
             if (sourceNode.type === 'priceData') {
@@ -276,7 +297,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
              if(!sourceNode) return null;
              if (sourceNode.type === 'indicator') { 
                  const params = sourceNode.data.params || { length: sourceNode.data.period || 14 };
-                 payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator, params: params, output_idx: sourceNode.data.outputIdx || 0 }; 
+                 payload.settings.nodes[sourceNode.id] = { class: "indicator", method: sourceNode.data.indicator || 'rsi', params: params, output_idx: sourceNode.data.outputIdx || 0 }; 
                  return sourceNode.id; 
              }
              if (sourceNode.type === 'priceData') { payload.settings.nodes[sourceNode.id] = { class: "price_data", type: sourceNode.data.priceType || "close", offset: sourceNode.data.offset || 0 }; return sourceNode.id; }
@@ -290,6 +311,17 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                      right: rightEdge ? traverseByEdge(rightEdge) : (sourceNode.data.rightValue !== undefined && sourceNode.data.rightValue !== "" ? sourceNode.data.rightValue : null) 
                  }; 
                  return sourceNode.id; 
+             }
+             // --- FIX: DE ONTBREKENDE LOGIC VERWERKING ---
+             if (sourceNode.type === 'logic') {
+                 const incomingEdges = edges.filter(e => e.target === sourceNode.id);
+                 payload.settings.nodes[sourceNode.id] = { 
+                     class: "logic", 
+                     operator: sourceNode.data.logicType || "and", 
+                     left: incomingEdges.length > 0 ? traverseByEdge(incomingEdges[0]) : null, 
+                     right: sourceNode.data.logicType === "not" ? null : (incomingEdges.length > 1 ? traverseByEdge(incomingEdges[1]) : null) 
+                 };
+                 return sourceNode.id;
              }
              return null;
         };

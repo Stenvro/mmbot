@@ -165,7 +165,7 @@ class BotManager:
                 
         bot_ids = await asyncio.to_thread(get_active_bot_ids)
         for bot_id in bot_ids:
-            asyncio.create_task(self._backfill_bot(bot_id))
+            asyncio.create_task(self._run_backfill_safely(bot_id))
 
     async def _listen_for_bot_starts(self):
         queue = event_bus.subscribe("BOT_STATE_CHANGED")
@@ -173,172 +173,171 @@ class BotManager:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
                 if event["action"] == "started":
-                    asyncio.create_task(self._backfill_bot(event["bot_id"]))
+                    asyncio.create_task(self._run_backfill_safely(event["bot_id"]))
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
 
-    async def _backfill_bot(self, bot_id: int):
-        def run_backfill():
-            db = SessionLocal()
-            try:
-                bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
-                if not bot or not bot.is_active: return
+    async def _run_backfill_safely(self, bot_id: int):
+        try:
+            await asyncio.to_thread(self._execute_sync_backfill, bot_id)
+        except Exception as e:
+            print(f"Error during thread backfill: {e}")
+
+    def _execute_sync_backfill(self, bot_id: int):
+        db = SessionLocal()
+        try:
+            bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
+            if not bot or not bot.is_active: return
+            
+            is_api_exec = bot.settings.get("api_execution", False)
+            has_key = bool(bot.settings.get("api_key_name"))
+            
+            live_mode = "forward_test"
+            if is_api_exec and has_key:
+                api_key = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
+                if api_key: live_mode = "paper" if api_key.is_sandbox else "live"
+
+            timeframe = bot.settings.get("timeframe")
+            exit_node = bot.settings.get("exit_node")
+            run_backtest = bot.settings.get("backtest_on_start", False)
+            lookback_limit = int(bot.settings.get("backtest_lookback", 150))
+
+            symbols = bot.settings.get("symbols", [])
+            if not symbols and bot.settings.get("symbol"):
+                symbols = [bot.settings.get("symbol")]
+
+            for symbol in symbols:
+                tf_seconds = 60
+                if timeframe.endswith('m'): tf_seconds = int(timeframe[:-1]) * 60
+                elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
+                elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
                 
-                is_api_exec = bot.settings.get("api_execution", False)
-                has_key = bool(bot.settings.get("api_key_name"))
-                
-                live_mode = "forward_test"
-                if is_api_exec and has_key:
-                    api_key = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
-                    if api_key: live_mode = "paper" if api_key.is_sandbox else "live"
-
-                timeframe = bot.settings.get("timeframe")
-                exit_node = bot.settings.get("exit_node")
-                run_backtest = bot.settings.get("backtest_on_start", False)
-                lookback_limit = int(bot.settings.get("backtest_lookback", 150))
-
-                symbols = bot.settings.get("symbols", [])
-                if not symbols and bot.settings.get("symbol"):
-                    symbols = [bot.settings.get("symbol")]
-
-                for symbol in symbols:
-                    tf_seconds = 60
-                    if timeframe.endswith('m'): tf_seconds = int(timeframe[:-1]) * 60
-                    elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
-                    elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
-                    
-                    for _ in range(20):
-                        latest_candle = db.query(Candle.timestamp).filter(
-                            Candle.symbol == symbol, Candle.timeframe == timeframe
-                        ).order_by(Candle.timestamp.desc()).first()
-                        
-                        if latest_candle:
-                            candle_ts = latest_candle[0]
-                            if candle_ts.tzinfo is None: candle_ts = candle_ts.replace(tzinfo=timezone.utc)
-                            diff_seconds = datetime.now(timezone.utc).timestamp() - candle_ts.timestamp()
-                            if diff_seconds <= (tf_seconds * 2): break
-                        time.sleep(1)
-
-                    query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
+                # Check DB for existing candles to avoid over-fetching
+                for _ in range(20):
+                    latest_candle = db.query(Candle.timestamp).filter(
                         Candle.symbol == symbol, Candle.timeframe == timeframe
-                    ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
+                    ).order_by(Candle.timestamp.desc()).first()
                     
-                    df = pd.read_sql(query, db.bind)
-                    if df.empty: continue
-                    df = df.sort_values('timestamp').reset_index(drop=True)
+                    if latest_candle:
+                        candle_ts = latest_candle[0]
+                        if candle_ts.tzinfo is None: candle_ts = candle_ts.replace(tzinfo=timezone.utc)
+                        diff_seconds = datetime.now(timezone.utc).timestamp() - candle_ts.timestamp()
+                        if diff_seconds <= (tf_seconds * 2): break
+                    time.sleep(1)
 
-                    evaluator = NodeEvaluator(bot.settings)
-                    evaluator.df = df.copy()
-                    evaluator._calculate_indicators() 
+                query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
+                    Candle.symbol == symbol, Candle.timeframe == timeframe
+                ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
+                
+                df = pd.read_sql(query, db.bind)
+                if df.empty: continue
+                df = df.sort_values('timestamp').reset_index(drop=True)
 
-                    existing_timestamps = {s[0] for s in db.query(Signal.timestamp).filter(Signal.bot_name == bot.name, Signal.symbol == symbol).all()}
+                evaluator = NodeEvaluator(bot.settings)
+                evaluator.df = df.copy()
+                evaluator._calculate_indicators() 
+
+                existing_timestamps = {s[0] for s in db.query(Signal.timestamp).filter(Signal.bot_name == bot.name, Signal.symbol == symbol).all()}
+                
+                open_bt_pos = None
+                last_bt_ts = None
+                
+                if run_backtest:
+                    last_order = db.query(Order).filter(Order.bot_name == bot.name, Order.symbol == symbol, Order.mode == "backtest").order_by(Order.timestamp.desc()).first()
+                    if last_order: 
+                        last_bt_ts = last_order.timestamp
+                        if last_bt_ts.tzinfo is None: last_bt_ts = last_bt_ts.replace(tzinfo=timezone.utc)
+
+                    open_bt_pos = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.mode == "backtest", Position.status == "open").first()
+
+                new_signals = []
+                standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr']
+                
+                entry_series = evaluator.resolve_node(bot.settings.get("entry_node")) if bot.settings.get("entry_node") else pd.Series(False, index=evaluator.df.index)
+                exit_series = evaluator.resolve_node(exit_node) if exit_node else pd.Series(False, index=evaluator.df.index)
+
+                for index, row in evaluator.df.iterrows():
+                    ts = row['timestamp']
+                    if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
+
+                    current_price = float(row['close'])
+                    current_high = float(row['high'])
+                    current_low = float(row['low'])
+                    just_opened_this_tick = False
+                    
+                    is_buy = bool(entry_series.iloc[index])
+                    is_sell = bool(exit_series.iloc[index])
+                    current_atr = float(evaluator.df['atr'].iloc[index]) if 'atr' in evaluator.df.columns and not pd.isna(evaluator.df['atr'].iloc[index]) else 0.0
+
+                    if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
+                        max_pos = int(bot.settings.get("max_positions", 1))
+                        
+                        if is_buy and not open_bt_pos and 1 <= max_pos:
+                            trade_amount = self._calculate_trade_amount(current_price, bot.settings)
+                            open_bt_pos = Position(bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=current_price, amount=trade_amount)
+                            db.add(open_bt_pos)
+                            db.flush() 
+                            db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=ts, status="filled"))
+                            just_opened_this_tick = True
+
+                        elif open_bt_pos and not just_opened_this_tick:
+                            exit_events = self._check_exits(open_bt_pos, current_price, current_high, current_low, is_sell, bot.settings, current_atr)
+                            
+                            for ev in exit_events:
+                                if open_bt_pos is None: break
+                                
+                                close_qty = open_bt_pos.amount * (ev['qty_pct'] / 100)
+                                close_qty = min(close_qty, open_bt_pos.amount)
+                                if close_qty <= 0: continue
+
+                                actual_price = ev['price']
+                                db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled"))
+                                
+                                realized_pnl = (actual_price - open_bt_pos.entry_price) * close_qty
+                                open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
+                                open_bt_pos.profit_pct = ((actual_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
+                                
+                                if open_bt_pos.id in self.position_states:
+                                    self.position_states[open_bt_pos.id]['triggered_exits'].add(ev['id'])
+                                
+                                if close_qty >= open_bt_pos.amount - 0.00001:
+                                    open_bt_pos.status = "closed"
+                                    open_bt_pos.closed_at = ts
+                                    if open_bt_pos.id in self.position_states:
+                                        del self.position_states[open_bt_pos.id]
+                                    open_bt_pos = None 
+                                else:
+                                    open_bt_pos.amount -= close_qty 
+
+                    if ts not in existing_timestamps:
+                        indicators = { col: float(row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(row[col]) }
+                        if indicators:
+                            action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
+                            new_signals.append(Signal(candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
+
+                if run_backtest and open_bt_pos:
+                    if live_mode == "forward_test":
+                        open_bt_pos.mode = "forward_test"
+                        db.query(Order).filter(Order.position_id == open_bt_pos.id).update({"mode": "forward_test"})
+                    else:
+                        db.query(Order).filter(Order.position_id == open_bt_pos.id).delete(synchronize_session=False)
+                        db.delete(open_bt_pos)
+                        if open_bt_pos.id in self.position_states:
+                            del self.position_states[open_bt_pos.id]
                     
                     open_bt_pos = None
-                    last_bt_ts = None
-                    
-                    if run_backtest:
-                        last_order = db.query(Order).filter(Order.bot_name == bot.name, Order.symbol == symbol, Order.mode == "backtest").order_by(Order.timestamp.desc()).first()
-                        if last_order: 
-                            last_bt_ts = last_order.timestamp
-                            if last_bt_ts.tzinfo is None: last_bt_ts = last_bt_ts.replace(tzinfo=timezone.utc)
 
-                        open_bt_pos = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.mode == "backtest", Position.status == "open").first()
+                if new_signals: db.bulk_save_objects(new_signals)
+                db.commit()
+                print(f"✅ Sync Complete: '{bot.name}' on {symbol} (Target Mode: {live_mode.upper()}) | Lookback: {lookback_limit}")
 
-                    new_signals = []
-                    standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr']
-                    
-                    entry_series = evaluator.resolve_node(bot.settings.get("entry_node")) if bot.settings.get("entry_node") else pd.Series(False, index=evaluator.df.index)
-                    exit_series = evaluator.resolve_node(exit_node) if exit_node else pd.Series(False, index=evaluator.df.index)
-
-                    for index, row in evaluator.df.iterrows():
-                        ts = row['timestamp']
-                        if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
-
-                        current_price = float(row['close'])
-                        current_high = float(row['high'])
-                        current_low = float(row['low'])
-                        just_opened_this_tick = False
-                        
-                        is_buy = bool(entry_series.iloc[index])
-                        is_sell = bool(exit_series.iloc[index])
-                        current_atr = float(evaluator.df['atr'].iloc[index]) if 'atr' in evaluator.df.columns and not pd.isna(evaluator.df['atr'].iloc[index]) else 0.0
-
-                        if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
-                            max_pos = int(bot.settings.get("max_positions", 1))
-                            
-                            if is_buy and not open_bt_pos and 1 <= max_pos:
-                                trade_amount = self._calculate_trade_amount(current_price, bot.settings)
-                                open_bt_pos = Position(bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=current_price, amount=trade_amount)
-                                db.add(open_bt_pos)
-                                db.flush() 
-                                db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=ts, status="filled"))
-                                just_opened_this_tick = True
-
-                            elif open_bt_pos and not just_opened_this_tick:
-                                exit_events = self._check_exits(open_bt_pos, current_price, current_high, current_low, is_sell, bot.settings, current_atr)
-                                
-                                for ev in exit_events:
-                                    if open_bt_pos is None: break
-                                    
-                                    close_qty = open_bt_pos.amount * (ev['qty_pct'] / 100)
-                                    close_qty = min(close_qty, open_bt_pos.amount)
-                                    if close_qty <= 0: continue
-
-                                    actual_price = ev['price']
-                                    db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled"))
-                                    
-                                    realized_pnl = (actual_price - open_bt_pos.entry_price) * close_qty
-                                    open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
-                                    open_bt_pos.profit_pct = ((actual_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
-                                    
-                                    if open_bt_pos.id in self.position_states:
-                                        self.position_states[open_bt_pos.id]['triggered_exits'].add(ev['id'])
-                                    
-                                    if close_qty >= open_bt_pos.amount - 0.00001:
-                                        open_bt_pos.status = "closed"
-                                        open_bt_pos.closed_at = ts
-                                        if open_bt_pos.id in self.position_states:
-                                            del self.position_states[open_bt_pos.id]
-                                        open_bt_pos = None 
-                                    else:
-                                        open_bt_pos.amount -= close_qty 
-
-                        if ts not in existing_timestamps:
-                            indicators = { col: float(row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(row[col]) }
-                            if indicators:
-                                action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
-                                new_signals.append(Signal(candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
-
-                    # --- HARDCORE LOGIC: OPEN BACKTEST POSITIONS MANAGEMENT ---
-                    if run_backtest and open_bt_pos:
-                        if live_mode == "forward_test":
-                            # We zitten in de lokale simulator. De open backtest trade mag DOORLOPEN naar live.
-                            open_bt_pos.mode = "forward_test"
-                            db.query(Order).filter(Order.position_id == open_bt_pos.id).update({"mode": "forward_test"})
-                        else:
-                            # We zitten op een echte API key (live of paper). 
-                            # We kunnen het verleden niet synchroniseren met de API. Wissen!
-                            db.query(Order).filter(Order.position_id == open_bt_pos.id).delete(synchronize_session=False)
-                            db.delete(open_bt_pos)
-                            if open_bt_pos.id in self.position_states:
-                                del self.position_states[open_bt_pos.id]
-                        
-                        open_bt_pos = None
-                    # -----------------------------------------------------------
-
-                    if new_signals: db.bulk_save_objects(new_signals)
-                    db.commit()
-                    print(f"✅ Sync Complete: '{bot.name}' on {symbol} (Target Mode: {live_mode.upper()}) | Lookback: {lookback_limit}")
-
-            except Exception as e:
-                print(f"❌ Backfill Error: {e}")
-                db.rollback()
-            finally:
-                db.close()
-                
-        await asyncio.to_thread(run_backfill)
+        except Exception as e:
+            print(f"❌ Backfill Error: {e}")
+            db.rollback()
+        finally:
+            db.close()
 
     async def _process_bots(self, symbol: str, timeframe: str):
         def run_logic():

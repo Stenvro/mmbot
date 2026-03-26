@@ -1,6 +1,7 @@
 import time
 from datetime import datetime, timezone
 from typing import Optional
+import asyncio
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -8,7 +9,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 import ccxt
 
-from backend.core.database import get_db
+# SessionLocal toegevoegd voor de threads!
+from backend.core.database import get_db, SessionLocal
 from backend.models.candles import Candle
 from backend.core.security import verify_api_key
 
@@ -26,52 +28,61 @@ class HistoricalDataFetch(BaseModel):
     end_date: datetime
 
 @router.post("/fetch/{symbol}")
-def fetch_historical_data(
+async def fetch_historical_data(
     symbol: str,
-    req: HistoricalDataFetch,
-    db: Session = Depends(get_db)
+    req: HistoricalDataFetch
 ):
+    # --- FIX: Verpakt in to_thread zodat de FastAPI backend niet bevriest voor andere knoppen ---
     try:
         formatted_symbol = symbol.replace('-', '/').upper()
+        result = await asyncio.to_thread(_fetch_and_save_data, formatted_symbol, req)
+        return result
+    except Exception as e:
+        print(f"❌ Error in manual sync: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _fetch_and_save_data(formatted_symbol: str, req: HistoricalDataFetch):
+    db = SessionLocal()
+    try:
         start_ts = int(req.start_date.timestamp() * 1000)
         end_ts = int(req.end_date.timestamp() * 1000)
 
         all_ohlcv = []
         
-        # --- FIX: ACHTERUIT PAGINEREN ---
-        # We beginnen bij de End Date en kruipen met blokken van 100 terug naar de Start Date
-        current_end = end_ts
+        # --- FIX: VOORUIT PAGINEREN ---
+        # We beginnen bij start_ts (oude datum) en werken onszelf een weg naar voren!
+        current_since = start_ts
 
-        print(f"📥 Manual Sync: {formatted_symbol} ({req.timeframe}) - Fetching backwards...")
+        print(f"📥 Manual Sync: {formatted_symbol} ({req.timeframe}) - Fetching forwards...")
 
-        while current_end > start_ts:
-            # We gebruiken de 'until' parameter om aan OKX door te geven tot waar we data willen zien
-            ohlcv = exchange.fetch_ohlcv(formatted_symbol, req.timeframe, limit=100, params={'until': current_end})
+        while current_since < end_ts:
+            try:
+                ohlcv = exchange.fetch_ohlcv(formatted_symbol, req.timeframe, limit=100, since=current_since)
+            except Exception as e:
+                print(f"⚠️ OKX fetch failed or limit reached: {e}")
+                break
             
             if not ohlcv or len(ohlcv) == 0: 
                 break 
             
-            # Filter de data zodat we niet per ongeluk verder terug gaan dan de start_ts
-            valid_ohlcv = [row for row in ohlcv if row[0] >= start_ts and row[0] <= current_end]
+            valid_ohlcv = [row for row in ohlcv if row[0] >= current_since and row[0] <= end_ts]
+            if not valid_ohlcv:
+                break
+                
             all_ohlcv.extend(valid_ohlcv)
 
-            # Pak de oudste kaars uit deze batch
-            first_ts = ohlcv[0][0]
+            latest_ts = valid_ohlcv[-1][0]
             
-            # Veiligheidscheck: Als de exchange vastloopt op dezelfde datum, stop de loop
-            if first_ts >= current_end: 
+            # Stop zodra we het heden hebben bereikt
+            if latest_ts >= end_ts: 
                 break 
                 
-            # Zet het nieuwe eindpunt precies vóór de oudste kaars die we net hebben opgehaald
-            current_end = first_ts - 1
-            
-            # Respecteer de API rate limits van OKX
+            current_since = latest_ts + 1
             time.sleep(exchange.rateLimit / 1000)
 
         if not all_ohlcv:
-            return {"message": "No data found for this period."}
+            return {"message": "No data found for this period. (Or OKX history limit reached)."}
         
-        # Omdat we achteruit hebben gehaald, staat de data nu omgekeerd. We sorteren het weer chronologisch.
         all_ohlcv.sort(key=lambda x: x[0])
         # --------------------------------
 
@@ -101,9 +112,8 @@ def fetch_historical_data(
             db.commit()
 
         return {"message": "Download complete.", "total_fetched": len(all_ohlcv), "new_saved": len(new_candles)}
-    except Exception as e:
-        print(f"❌ Error in manual sync: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 @router.get("/summary")
 def get_data_summary(db: Session = Depends(get_db)):

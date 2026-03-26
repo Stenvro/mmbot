@@ -5,8 +5,9 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any 
 from datetime import datetime, timezone
 import json 
+import asyncio
 
-from backend.core.database import get_db 
+from backend.core.database import get_db, SessionLocal
 from backend.models.bots import BotConfig 
 from backend.models.signals import Signal 
 from backend.models.orders import Order
@@ -39,7 +40,6 @@ class BotResponse(BotBase):
 def get_all_bots(db: Session = Depends(get_db)): 
     return db.query(BotConfig).all() 
 
-# --- FIX: Limiet drastisch verhoogd zodat je onbeperkt kan backtesten ---
 @router.get("/signals") 
 def get_bot_signals(symbol: str, timeframe: str, limit: int = 100000, db: Session = Depends(get_db)): 
     all_bots = db.query(BotConfig).all() 
@@ -102,8 +102,9 @@ def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
     db.refresh(new_bot) 
     return new_bot 
 
+# FIX: Maak de update async zodat hij het opschonen (wat lang kan duren) in de achtergrond doet
 @router.put("/{bot_id}") 
-def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depends(get_db)): 
+async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depends(get_db)): 
     bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first() 
     if not bot: 
         raise HTTPException(status_code=404, detail="Bot not found") 
@@ -118,12 +119,25 @@ def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depends(ge
         bot.settings = current_settings 
         flag_modified(bot, "settings") 
 
-        db.query(Signal).filter(Signal.bot_name == bot.name).delete(synchronize_session=False)
-        db.query(Order).filter(Order.bot_name == bot.name, Order.mode == "backtest").delete(synchronize_session=False)
-        db.query(Position).filter(Position.bot_name == bot.name, Position.mode == "backtest").delete(synchronize_session=False)
+        # We geven de opdracht om te schonen aan een achtergrond thread
+        bot_name = bot.name
+        asyncio.create_task(flush_bot_data(bot_name))
 
     db.commit() 
     return {"message": "Bot configuration updated successfully"} 
+
+async def flush_bot_data(bot_name: str):
+    def _flush():
+        db = SessionLocal()
+        try:
+            db.query(Signal).filter(Signal.bot_name == bot_name).delete(synchronize_session=False)
+            db.query(Order).filter(Order.bot_name == bot_name, Order.mode == "backtest").delete(synchronize_session=False)
+            db.query(Position).filter(Position.bot_name == bot_name, Position.mode == "backtest").delete(synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+    
+    await asyncio.to_thread(_flush)
 
 @router.delete("/{bot_id}") 
 def delete_bot(bot_id: int, db: Session = Depends(get_db)): 

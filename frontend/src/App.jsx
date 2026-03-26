@@ -10,12 +10,10 @@ import Home from './components/Home';
 import { apiClient } from './api/client';
 
 export default function App() {
-  // --- FIX 1: Haal de actieve weergave uit de lokale opslag (of ga naar 'home') ---
   const [activeView, setActiveView] = useState(() => {
       return localStorage.getItem('apex_activeView') || 'home';
   });
 
-  // --- FIX 2: Haal de open grafieken uit de lokale opslag ---
   const [openCharts, setOpenCharts] = useState(() => {
       const savedCharts = localStorage.getItem('apex_openCharts');
       return savedCharts ? JSON.parse(savedCharts) : [];
@@ -29,7 +27,6 @@ export default function App() {
 
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
 
-  // --- FIX 3: Sla veranderingen direct op in je lokale opslag ---
   useEffect(() => {
       localStorage.setItem('apex_activeView', activeView);
   }, [activeView]);
@@ -117,7 +114,8 @@ export default function App() {
     if (activeView === chartId) {
       setActiveView('home');
     }
-    if (window.innerWidth < 768) setSidebarOpen(false);
+    // FIX: De onderstaande regel is verwijderd zodat de sidebar op mobiel netjes open blijft!
+    // if (window.innerWidth < 768) setSidebarOpen(false); 
   };
 
   const navigateTo = (view) => {
