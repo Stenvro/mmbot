@@ -20,7 +20,7 @@ const nodeTypes = {
 
 const getId = () => `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// FIX: Veilige parser die alleen de trigger/close values hard forceert naar numbers, 
+// Veilige parser die alleen de trigger/close values hard forceert naar numbers, 
 // maar strings met rust laat voor de rest.
 const parseSafeFloat = (val) => {
     if (val === "" || val === undefined || val === null) return "";
@@ -72,7 +72,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         }));
     }).catch(() => {});
 
-    // FIX: Zorg dat bestaande bots goed worden geparseerd, inclusief geneste data!
     if (editingBot && editingBot.settings.ui_layout) {
         const restoredNodes = editingBot.settings.ui_layout.nodes.map(n => ({
             ...n, data: { ...n.data, onChange: updateNodeData, onDelete: deleteNode }
@@ -82,8 +81,9 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         initRef.current = true;
     } else if (!editingBot) {
         setNodes([
-            { id: getId(), type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'paper', maxPositions: 1, maxPositionsScope: 'per_pair' } },
-            { id: getId(), type: 'whitelist', position: { x: 380, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDT' } }
+            { id: getId(), type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'paper', maxPositions: 1, maxPositionsScope: 'per_pair', cooldownTrades: 0, cooldownCandles: 0 } },
+            // FIX: Startpositie X flink opgeschoven naar 600 zodat brede blokken niet meer overlappen
+            { id: getId(), type: 'whitelist', position: { x: 500, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDC' } }
         ]);
         initRef.current = true;
     }
@@ -109,7 +109,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       if (type === 'priceData') { defaultData.priceType = 'close'; defaultData.offset = 0; }
       if (type === 'condition') { defaultData.operator = '>'; defaultData.rightValue = ''; }
       if (type === 'logic') defaultData.logicType = 'and';
-      if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'paper'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; }
+      if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'paper'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; defaultData.cooldownTrades = 0; defaultData.cooldownCandles = 0; }
       if (type === 'whitelist') defaultData.pairs = 'BTC/USDT';
       if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; defaultData.lookback = 150; }
       if (type === 'stopLoss' || type === 'takeProfit') { 
@@ -191,6 +191,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 timeframe: configNode.data.timeframe || "1m",
                 max_positions: configNode.data.maxPositions || 1,
                 max_positions_scope: configNode.data.maxPositionsScope || 'per_pair',
+                cooldown_trades: configNode.data.cooldownTrades || 0,
+                cooldown_candles: configNode.data.cooldownCandles || 0,
                 api_execution: configNode.data.executionMode === 'exchange',
                 backtest_on_start: backtestNode ? backtestNode.data.runOnStart : false,
                 backtest_capital: backtestNode ? backtestNode.data.capital : 1000,
@@ -205,7 +207,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
             }
         };
 
-        // --- FIX: Forceer ALLE indicatoren in payload, ongeacht verbinding ---
         nodes.forEach(n => {
             if (n.type === 'indicator') {
                 payload.settings.nodes[n.id] = { 
@@ -221,8 +222,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const exitNode = nodes.find(n => n.type === 'action' && n.data.actionType === 'sell');
 
         if (entryNode) {
-             const tpEdges = edges.filter(e => e.target === entryNode.id && (e.targetHandle === 'tp' || nodes.find(n => n.id === e.source)?.type === 'takeProfit'));
-             const slEdges = edges.filter(e => e.target === entryNode.id && (e.targetHandle === 'sl' || nodes.find(n => n.id === e.source)?.type === 'stopLoss'));
+             const tpEdges = edges.filter(e => e.source === entryNode.id && e.sourceHandle === 'tp');
+             const slEdges = edges.filter(e => e.source === entryNode.id && e.sourceHandle === 'sl');
 
              payload.settings.trade_settings.entry = {
                  order_type: entryNode.data.orderType || 'market',
@@ -231,13 +232,15 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                  fee: entryNode.data.fee !== undefined && entryNode.data.fee !== "" ? entryNode.data.fee : 0.1,
                  slippage: entryNode.data.slippage !== undefined && entryNode.data.slippage !== "" ? entryNode.data.slippage : 0.05,
                  take_profits: tpEdges.map(e => {
-                     const n = nodes.find(nd => nd.id === e.source);
+                     const n = nodes.find(nd => nd.id === e.target);
+                     if(!n) return null;
                      return { type: n.data.triggerType, value: parseFloat(n.data.triggerValue) || 0, close_amount_type: n.data.closeType, close_amount_value: parseFloat(n.data.closeValue) || 100 };
-                 }),
+                 }).filter(Boolean),
                  stop_losses: slEdges.map(e => {
-                     const n = nodes.find(nd => nd.id === e.source);
+                     const n = nodes.find(nd => nd.id === e.target);
+                     if(!n) return null;
                      return { type: n.data.triggerType, value: parseFloat(n.data.triggerValue) || 0, close_amount_type: n.data.closeType, close_amount_value: parseFloat(n.data.closeValue) || 100 };
-                 })
+                 }).filter(Boolean)
              };
         }
         
@@ -312,7 +315,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                  }; 
                  return sourceNode.id; 
              }
-             // --- FIX: DE ONTBREKENDE LOGIC VERWERKING ---
              if (sourceNode.type === 'logic') {
                  const incomingEdges = edges.filter(e => e.target === sourceNode.id);
                  payload.settings.nodes[sourceNode.id] = { 
@@ -402,7 +404,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar pb-24 md:pb-5">
             <div className="space-y-3">
                 <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#2b3139] pb-1">1. Setup & Context</span>
-                {/* FIX: onClick toegevoegd aan elk blokje speciaal voor mobiel */}
                 <div className="p-3 bg-[#0b0e11] border border-[#8b5cf6]/50 rounded text-[11px] text-[#8b5cf6] font-bold cursor-pointer md:cursor-grab hover:bg-[#8b5cf6]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'botConfig')} onClick={() => handleAddNodeMobile('botConfig')} draggable>Main Configuration</div>
                 <div className="p-3 bg-[#0b0e11] border border-[#d946ef]/50 rounded text-[11px] text-[#d946ef] font-bold cursor-pointer md:cursor-grab hover:bg-[#d946ef]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'whitelist')} onClick={() => handleAddNodeMobile('whitelist')} draggable>Asset Whitelist</div>
                 <div className="p-3 bg-[#0b0e11] border border-[#fcd535]/50 rounded text-[11px] text-[#fcd535] font-bold cursor-pointer md:cursor-grab hover:bg-[#fcd535]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'backtest')} onClick={() => handleAddNodeMobile('backtest')} draggable>Backtest Engine</div>

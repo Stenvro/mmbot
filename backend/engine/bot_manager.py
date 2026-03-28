@@ -2,7 +2,7 @@ import asyncio
 import time
 import pandas as pd
 import ccxt
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from backend.core.database import SessionLocal
@@ -129,19 +129,33 @@ class BotManager:
                 
                 if tp_val <= 0: continue
                 
-                t_price = open_position.entry_price * (1 + (tp_val/100)) if tp['type'] == 'percentage' else tp_val
-                tps.append({'id': tp_id, 'price': t_price, 'pct': float(tp.get('close_amount_value', 100))})
+                if tp['type'] == 'percentage':
+                    t_price = open_position.entry_price * (1 + (tp_val/100))
+                    if row_high >= t_price:
+                        tps.append({'id': tp_id, 'price': t_price, 'pct': float(tp.get('close_amount_value', 100))})
+                elif tp['type'] == 'trailing':
+                    t_price = state['highest_price'] * (1 - (tp_val/100))
+                    if row_low <= t_price:
+                        tps.append({'id': tp_id, 'price': t_price, 'pct': float(tp.get('close_amount_value', 100))})
+                elif tp['type'] == 'atr':
+                    if current_atr <= 0: continue
+                    t_price = state['highest_price'] - (tp_val * current_atr)
+                    if row_low <= t_price:
+                        tps.append({'id': tp_id, 'price': t_price, 'pct': float(tp.get('close_amount_value', 100))})
+                else: 
+                    t_price = tp_val
+                    if row_high >= t_price:
+                        tps.append({'id': tp_id, 'price': t_price, 'pct': float(tp.get('close_amount_value', 100))})
             
-            tps = sorted(tps, key=lambda x: x['price'])
+            tps = sorted(tps, key=lambda x: x['price'], reverse=True)
             
             for tp in tps:
-                if row_high >= tp['price']:
-                    events.append({
-                        'qty_pct': tp['pct'],
-                        'reason': "take_profit",
-                        'price': tp['price'], 
-                        'id': tp['id']
-                    })
+                events.append({
+                    'qty_pct': tp['pct'],
+                    'reason': "take_profit",
+                    'price': tp['price'], 
+                    'id': tp['id']
+                })
         
         if not events and is_sell_signal:
             exit_settings = trade_settings.get("exit", {})
@@ -215,7 +229,6 @@ class BotManager:
                 elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
                 elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
                 
-                # --- FIX: SLIM WACHTEN OP DE STREAMER BULK INSERT ---
                 initial_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
                 print(f"⏳ BotManager: Controleren op data voor {symbol} (Start met {initial_count} kaarsen)...")
                 last_count = -1
@@ -230,9 +243,6 @@ class BotManager:
                         
                     if current_count == last_count:
                         stagnant_checks += 1
-                        # De streamer slaat alles in één grote batch op aan het einde.
-                        # Zolang de count gelijk is aan het begin, downloadt hij nog. Geef hem 40 sec (8x5s)
-                        # Is de batch geland maar nog onder de limiet (zoals bij ETH)? Wacht nog 10 sec (2x5s).
                         max_stagnant = 8 if current_count == initial_count else 2
                         
                         if stagnant_checks >= max_stagnant:
@@ -243,7 +253,6 @@ class BotManager:
                         
                     last_count = current_count
                     time.sleep(5)
-                # ----------------------------------------------------
 
                 for _ in range(20):
                     latest_candle = db.query(Candle.timestamp).filter(
@@ -263,11 +272,9 @@ class BotManager:
                 
                 df = pd.read_sql(query, db.bind)
                 
-                # --- WISKUNDE CRASH PROTECTIE ---
                 if df.empty or len(df) < 50: 
-                    print(f"⏳ Te weinig data voor {symbol} ({len(df)} kaarsen, min. 50 nodig). Backtest overgeslagen.")
+                    print(f"❌ Te weinig data voor {symbol} (Heeft {len(df)} kaarsen, min. 50 nodig). Backtest overgeslagen.")
                     continue
-                # --------------------------------
                 
                 df = df.sort_values('timestamp').reset_index(drop=True)
 
@@ -294,6 +301,12 @@ class BotManager:
                 entry_series = evaluator.resolve_node(bot.settings.get("entry_node")) if bot.settings.get("entry_node") else pd.Series(False, index=evaluator.df.index)
                 exit_series = evaluator.resolve_node(exit_node) if exit_node else pd.Series(False, index=evaluator.df.index)
 
+                # --- FIX: COOLDOWN VARIABELEN ---
+                cooldown_trades = int(bot.settings.get("cooldown_trades", 0))
+                cooldown_candles = int(bot.settings.get("cooldown_candles", 0))
+                trade_entry_indices = []
+                # --------------------------------
+
                 for index, row in evaluator.df.iterrows():
                     ts = row['timestamp']
                     if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
@@ -310,7 +323,16 @@ class BotManager:
                     if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
                         max_pos = int(bot.settings.get("max_positions", 1))
                         
-                        if is_buy and not open_bt_pos and 1 <= max_pos:
+                        # --- FIX: COOLDOWN CHECK (BACKTEST) ---
+                        can_buy_cooldown = True
+                        if cooldown_trades > 0 and cooldown_candles > 0:
+                            recent_trades = [idx for idx in trade_entry_indices if (index - idx) < cooldown_candles]
+                            if len(recent_trades) >= cooldown_trades:
+                                can_buy_cooldown = False
+                        # --------------------------------------
+
+                        if is_buy and not open_bt_pos and 1 <= max_pos and can_buy_cooldown:
+                            trade_entry_indices.append(index)
                             trade_amount = self._calculate_trade_amount(current_price, bot.settings)
                             open_bt_pos = Position(bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=current_price, amount=trade_amount)
                             db.add(open_bt_pos)
@@ -399,10 +421,8 @@ class BotManager:
                 
                 df = pd.read_sql(query, db.bind)
                 
-                # --- LIVE LOOP CRASH PROTECTIE ---
                 if df.empty or len(df) < 50: 
                     return
-                # ---------------------------------
                 
                 df = df.sort_values('timestamp').reset_index(drop=True)
 
@@ -448,7 +468,34 @@ class BotManager:
                     ccxt_symbol = symbol.replace('-', '/').upper()
                     just_opened_ids = set()
 
-                    if is_buy and open_count < max_pos:
+                    # --- FIX: COOLDOWN CHECK (LIVE) ---
+                    tf_seconds = 60
+                    if timeframe.endswith('m'): tf_seconds = int(timeframe[:-1]) * 60
+                    elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
+                    elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
+                    
+                    cooldown_trades = int(bot.settings.get("cooldown_trades", 0))
+                    cooldown_candles = int(bot.settings.get("cooldown_candles", 0))
+                    
+                    can_buy_cooldown = True
+                    if cooldown_trades > 0 and cooldown_candles > 0:
+                        safe_latest_time = latest_time
+                        if safe_latest_time.tzinfo is None:
+                            safe_latest_time = safe_latest_time.replace(tzinfo=timezone.utc)
+                            
+                        threshold_time = safe_latest_time - timedelta(seconds=cooldown_candles * tf_seconds)
+                        recent_buys = db.query(Order).filter(
+                            Order.bot_name == bot.name,
+                            Order.symbol == symbol,
+                            Order.mode == mode,
+                            Order.side == "buy",
+                            Order.timestamp > threshold_time
+                        ).count()
+                        if recent_buys >= cooldown_trades:
+                            can_buy_cooldown = False
+                    # ----------------------------------
+
+                    if is_buy and open_count < max_pos and can_buy_cooldown:
                         trade_amount = self._calculate_trade_amount(current_price, bot.settings)
                         
                         try:

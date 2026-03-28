@@ -98,6 +98,18 @@ export const BotConfigNode = ({ id, data }) => (
           <option value="global">Global (Total across wallet)</option>
         </select>
       </div>
+
+      {/* --- FIX: TEKST AANGEPAST VOOR ABSOLUTE DUIDELIJKHEID --- */}
+      <div className="pt-2 border-t border-[#2b3139]">
+        <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Max New Entries per X Candles (0 = Off)</label>
+        <div className="flex space-x-2 items-center">
+            <input type="number" placeholder="Max Entries" title="Max Entries" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.cooldownTrades !== undefined ? data.cooldownTrades : 0} onChange={(e) => data.onChange(id, 'cooldownTrades', e.target.value === "" ? "" : parseInt(e.target.value))} />
+            <span className="text-[9px] text-[#848e9c] font-bold uppercase">PER</span>
+            <input type="number" placeholder="Candles" title="Amount of Candles" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.cooldownCandles !== undefined ? data.cooldownCandles : 0} onChange={(e) => data.onChange(id, 'cooldownCandles', e.target.value === "" ? "" : parseInt(e.target.value))} />
+        </div>
+      </div>
+      {/* -------------------------------------------------------- */}
+
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Live Execution Mode</label>
         <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode !== undefined ? data.executionMode : "paper"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
@@ -234,7 +246,7 @@ export const IndicatorNode = ({ id, data }) => {
       )}
 
     </div>
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-5 h-5 bg-[#fcd535] border-[3px] border-[#181a20] -right-[10px]" />
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#181a20] -right-[16px]" />
   </div>
   );
 };
@@ -265,14 +277,14 @@ export const PriceDataNode = ({ id, data }) => (
          </select>
       </div>
     </div>
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-5 h-5 bg-[#fcd535] border-[3px] border-[#181a20] -right-[10px]" />
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#181a20] -right-[16px]" />
   </div>
 );
 
 export const ConditionNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#3b4149] rounded shadow-lg min-w-[260px] relative">
-    <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-5 h-5 bg-[#0ea5e9] border-[3px] border-[#181a20] -left-[10px]" />
-    <Handle type="target" position={Position.Left} id="right" style={{ top: '80%' }} className="w-5 h-5 bg-[#d946ef] border-[3px] border-[#181a20] -left-[10px]" />
+    <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-8 h-8 bg-[#0ea5e9] border-[4px] border-[#181a20] -left-[16px]" />
+    <Handle type="target" position={Position.Left} id="right" style={{ top: '80%' }} className="w-8 h-8 bg-[#d946ef] border-[4px] border-[#181a20] -left-[16px]" />
     
     <div className="bg-[#3b4149]/30 px-3 py-2 border-b border-[#3b4149]/50 flex justify-between items-center">
       <span className="font-bold text-[#eaecef] text-[11px] uppercase tracking-wider">DATA CONDITION</span>
@@ -305,7 +317,7 @@ export const ConditionNode = ({ id, data }) => (
       </div>
     </div>
     
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-5 h-5 bg-[#fcd535] border-[3px] border-[#181a20] -right-[10px]" />
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#181a20] -right-[16px]" />
   </div>
 );
 
@@ -313,9 +325,9 @@ export const LogicNode = ({ id, data }) => {
   const isSingleInput = data.logicType === "not";
   return (
     <div className="bg-[#181a20] border border-[#2ea043] rounded shadow-lg min-w-[200px] relative">
-      <Handle type="target" position={Position.Left} id="in1" style={{ top: isSingleInput ? '50%' : '35%' }} className="w-5 h-5 bg-[#848e9c] border-[3px] border-[#181a20] -left-[10px]" />
+      <Handle type="target" position={Position.Left} id="in1" style={{ top: isSingleInput ? '50%' : '35%' }} className="w-8 h-8 bg-[#848e9c] border-[4px] border-[#181a20] -left-[16px]" />
       {!isSingleInput && (
-        <Handle type="target" position={Position.Left} id="in2" style={{ top: '65%' }} className="w-5 h-5 bg-[#848e9c] border-[3px] border-[#181a20] -left-[10px]" />
+        <Handle type="target" position={Position.Left} id="in2" style={{ top: '65%' }} className="w-8 h-8 bg-[#848e9c] border-[4px] border-[#181a20] -left-[16px]" />
       )}
       <div className="bg-[#2ea043]/10 px-3 py-2 border-b border-[#2ea043]/30 flex justify-between items-center">
         <span className="font-bold text-[#2ea043] text-[11px] uppercase tracking-wider">LOGIC GATE</span>
@@ -331,7 +343,7 @@ export const LogicNode = ({ id, data }) => {
           <option value="not">NOT (Invert Input)</option>
         </select>
       </div>
-      <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-5 h-5 bg-[#fcd535] border-[3px] border-[#181a20] -right-[10px]" />
+      <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#181a20] -right-[16px]" />
     </div>
   );
 };
@@ -343,8 +355,7 @@ export const LogicNode = ({ id, data }) => {
 export const StopLossNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#f6465d] rounded shadow-lg min-w-[280px] relative">
     
-    {/* Veranderd naar links voor mooiere flow */}
-    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-5 h-5 bg-[#f6465d] border-[3px] border-[#181a20] -left-[10px]" />
+    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-8 h-8 bg-[#f6465d] border-[4px] border-[#181a20] -left-[16px]" />
     
     <div className="bg-[#f6465d]/10 px-3 py-2 border-b border-[#f6465d]/30 flex justify-between items-center">
       <span className="font-bold text-[#f6465d] text-[11px] uppercase tracking-wider">STOP LOSS (RISK)</span>
@@ -383,8 +394,7 @@ export const StopLossNode = ({ id, data }) => (
 export const TakeProfitNode = ({ id, data }) => (
   <div className="bg-[#181a20] border border-[#2ebd85] rounded shadow-lg min-w-[280px] relative">
     
-    {/* Veranderd naar links voor mooiere flow */}
-    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-5 h-5 bg-[#2ebd85] border-[3px] border-[#181a20] -left-[10px]" />
+    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-8 h-8 bg-[#2ebd85] border-[4px] border-[#181a20] -left-[16px]" />
 
     <div className="bg-[#2ebd85]/10 px-3 py-2 border-b border-[#2ebd85]/30 flex justify-between items-center">
       <span className="font-bold text-[#2ebd85] text-[11px] uppercase tracking-wider">TAKE PROFIT (TARGET)</span>
@@ -397,11 +407,13 @@ export const TakeProfitNode = ({ id, data }) => (
       <div>
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Trigger Level (Profit)</label>
         <div className="flex space-x-2">
-            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#2ebd85] outline-none" value={data.triggerType !== undefined ? data.triggerType : "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
+            <select className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] font-bold rounded p-2 nodrag focus:border-[#2ebd85] outline-none" value={data.triggerType !== undefined ? data.triggerType : "percentage"} onChange={(e) => data.onChange(id, 'triggerType', e.target.value)}>
                 <option value="percentage">Percentage (%)</option>
+                <option value="trailing">Trailing (%)</option>
+                <option value="atr">ATR Trailing (x)</option>
                 <option value="fixed">Fixed Price</option>
             </select>
-            <input type="number" placeholder="e.g. 10" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#2ebd85] text-xs rounded p-2 nodrag font-mono focus:border-[#2ebd85] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
+            <input type="number" placeholder={data.triggerType === 'atr' ? "Multiplier (e.g. 2.5)" : "Value"} className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#2ebd85] text-xs rounded p-2 nodrag font-mono focus:border-[#2ebd85] outline-none text-center" value={data.triggerValue !== undefined ? data.triggerValue : ""} onChange={(e) => data.onChange(id, 'triggerValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
         </div>
       </div>
       <div className="pt-3 border-t border-[#2b3139]">
@@ -437,8 +449,8 @@ export const ActionNode = ({ id, data }) => {
       <div className="p-4 bg-[#0b0e11]/80 rounded-b space-y-4">
          
          <div className="relative border border-[#2b3139] rounded p-3">
-             <Handle type="target" position={Position.Left} id="logic" className="w-5 h-5 bg-[#848e9c] border-[3px] border-[#181a20] -left-[16px]" style={{ top: '50%' }} />
-             <span className="absolute -left-12 top-1/2 -translate-y-1/2 text-[9px] font-bold text-[#848e9c] -rotate-90">LOGIC</span>
+             <Handle type="target" position={Position.Left} id="logic" className="w-8 h-8 bg-[#848e9c] border-[4px] border-[#181a20] -left-[16px]" style={{ top: '50%' }} />
+             <span className="absolute -left-14 top-1/2 -translate-y-1/2 text-[9px] font-bold text-[#848e9c] -rotate-90">LOGIC</span>
              
              <div className="flex space-x-2">
                 <div className="w-1/2">
@@ -483,12 +495,11 @@ export const ActionNode = ({ id, data }) => {
          {isBuy && (
              <div className="relative border border-[#2b3139] rounded p-3 pt-4 pb-4 mt-2">
                  
-                 {/* SL/TP Handvatten naar rechts verplaatst */}
-                 <Handle type="source" position={Position.Right} id="tp" className="w-5 h-5 bg-[#2ebd85] border-[3px] border-[#181a20] -right-[16px]" style={{ top: '30%' }} />
-                 <span className="absolute right-[-6px] top-[30%] -translate-y-1/2 text-[9px] font-bold text-[#2ebd85] translate-x-full">TP</span>
+                 <Handle type="source" position={Position.Right} id="tp" className="w-8 h-8 bg-[#2ebd85] border-[4px] border-[#181a20] -right-[16px]" style={{ top: '30%' }} />
+                 <span className="absolute right-[8px] top-[30%] -translate-y-1/2 text-[9px] font-bold text-[#2ebd85] translate-x-full">TP</span>
                  
-                 <Handle type="source" position={Position.Right} id="sl" className="w-5 h-5 bg-[#f6465d] border-[3px] border-[#181a20] -right-[16px]" style={{ top: '70%' }} />
-                 <span className="absolute right-[-6px] top-[70%] -translate-y-1/2 text-[9px] font-bold text-[#f6465d] translate-x-full">SL</span>
+                 <Handle type="source" position={Position.Right} id="sl" className="w-8 h-8 bg-[#f6465d] border-[4px] border-[#181a20] -right-[16px]" style={{ top: '70%' }} />
+                 <span className="absolute right-[8px] top-[70%] -translate-y-1/2 text-[9px] font-bold text-[#f6465d] translate-x-full">SL</span>
                  
                  <div className="text-[9px] text-[#848e9c] italic text-center leading-relaxed">
                      Connect Take Profit or Stop Loss blocks to the <span className="text-[#2ebd85] font-bold">TP</span> and <span className="text-[#f6465d] font-bold">SL</span> ports on the right.
