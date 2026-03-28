@@ -8,7 +8,6 @@
 *.sqlite3
 *.db
 *.db3
-data/
 *.log
 
 # --- PYTHON BACKEND ---
@@ -31,3 +30,6 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+
+*.pem
+*.key
