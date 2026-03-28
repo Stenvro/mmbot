@@ -4,6 +4,7 @@ import pandas as pd
 import ccxt
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from backend.core.database import SessionLocal
 from backend.models.bots import BotConfig
 from backend.models.candles import Candle
@@ -214,7 +215,36 @@ class BotManager:
                 elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
                 elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
                 
-                # Check DB for existing candles to avoid over-fetching
+                # --- FIX: SLIM WACHTEN OP DE STREAMER BULK INSERT ---
+                initial_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
+                print(f"⏳ BotManager: Controleren op data voor {symbol} (Start met {initial_count} kaarsen)...")
+                last_count = -1
+                stagnant_checks = 0
+                
+                while True:
+                    current_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
+                    
+                    if current_count >= lookback_limit:
+                        print(f"✅ BotManager: Voldoende data aanwezig voor {symbol} ({current_count}/{lookback_limit}).")
+                        break
+                        
+                    if current_count == last_count:
+                        stagnant_checks += 1
+                        # De streamer slaat alles in één grote batch op aan het einde.
+                        # Zolang de count gelijk is aan het begin, downloadt hij nog. Geef hem 40 sec (8x5s)
+                        # Is de batch geland maar nog onder de limiet (zoals bij ETH)? Wacht nog 10 sec (2x5s).
+                        max_stagnant = 8 if current_count == initial_count else 2
+                        
+                        if stagnant_checks >= max_stagnant:
+                            print(f"⚠️ BotManager: Data-aanwas voor {symbol} gestopt bij {current_count} kaarsen. Start backtest met beschikbare data.")
+                            break
+                    else:
+                        stagnant_checks = 0 
+                        
+                    last_count = current_count
+                    time.sleep(5)
+                # ----------------------------------------------------
+
                 for _ in range(20):
                     latest_candle = db.query(Candle.timestamp).filter(
                         Candle.symbol == symbol, Candle.timeframe == timeframe
@@ -232,7 +262,13 @@ class BotManager:
                 ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
                 
                 df = pd.read_sql(query, db.bind)
-                if df.empty: continue
+                
+                # --- WISKUNDE CRASH PROTECTIE ---
+                if df.empty or len(df) < 50: 
+                    print(f"⏳ Te weinig data voor {symbol} ({len(df)} kaarsen, min. 50 nodig). Backtest overgeslagen.")
+                    continue
+                # --------------------------------
+                
                 df = df.sort_values('timestamp').reset_index(drop=True)
 
                 evaluator = NodeEvaluator(bot.settings)
@@ -362,7 +398,12 @@ class BotManager:
                 ).order_by(Candle.timestamp.desc()).limit(max_lookback).statement
                 
                 df = pd.read_sql(query, db.bind)
-                if df.empty: return
+                
+                # --- LIVE LOOP CRASH PROTECTIE ---
+                if df.empty or len(df) < 50: 
+                    return
+                # ---------------------------------
+                
                 df = df.sort_values('timestamp').reset_index(drop=True)
 
                 for bot in matching_bots:

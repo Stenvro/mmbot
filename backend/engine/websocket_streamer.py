@@ -60,54 +60,61 @@ class OKXStreamer:
                 timeframe = channel.replace("candle", "").lower()
                 tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
                 
+                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching up to {lookback_limit} candles BACKWARDS...")
+                
                 now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                # Bereken het exacte startpunt in het verleden
-                target_since = now_ms - ((lookback_limit + 10) * tf_ms)
-                
-                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching {lookback_limit} candles forwards...")
-                
-                # --- FIX: FORWARD PAGINATION ---
-                # Door 'since' te gebruiken forceert CCXT het archief-endpoint van OKX
-                current_since = target_since
+                current_end = now_ms
                 all_ohlcv = []
                 
-                while current_since < now_ms and len(all_ohlcv) < (lookback_limit + 10):
-                    try:
-                        ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=100, since=current_since)
-                    except Exception as ex:
-                        print(f"⚠️ Warning: Could not fetch {symbol} from OKX: {ex}")
-                        break
-                        
-                    if not ohlcv or len(ohlcv) == 0:
-                        break
-                        
-                    valid_ohlcv = [row for row in ohlcv if row[0] >= current_since]
-                    
-                    if not valid_ohlcv:
-                        break
-                        
-                    all_ohlcv.extend(valid_ohlcv)
-                    
-                    # Zoek de allerlaatste (meest recente) kaars uit deze batch
-                    latest_ts = valid_ohlcv[-1][0]
-                    
-                    if latest_ts >= now_ms: 
-                        break 
-                    
-                    # Schuif het vizier voor de volgende cycle naar 1 ms na de laatst gevonden kaars
-                    current_since = latest_ts + 1 
-                    time.sleep(self.exchange.rateLimit / 1000)
+                bar_map = {'1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1H', '2h': '2H', '4h': '4H', '1d': '1D'}
+                bar = bar_map.get(timeframe.lower(), '15m')
                 
-                # Trim the data to exactly what we requested
-                all_ohlcv.sort(key=lambda x: x[0])
-                all_ohlcv = all_ohlcv[-(lookback_limit + 10):]
-                # --------------------------------
-
+                # --- FIX: ACHTERUIT DOWNLOADEN ---
+                while len(all_ohlcv) < lookback_limit:
+                    try:
+                        res = self.exchange.publicGetMarketHistoryCandles({
+                            'instId': inst_id,
+                            'bar': bar,
+                            'after': str(current_end),
+                            'limit': '100'
+                        })
+                        
+                        if not res or 'data' not in res or not res['data']:
+                            print(f"⚠️ Listing datum of maximum historie bereikt voor {symbol}.")
+                            break 
+                            
+                        data = res['data']
+                        all_ohlcv.extend(data)
+                        
+                        # data[-1] is de oudste kaars in deze specifieke batch. 
+                        current_end = int(data[-1][0])
+                        time.sleep(self.exchange.rateLimit / 1000)
+                        
+                    except Exception as ex:
+                        print(f"⚠️ OKX Archief Error voor {symbol}: {ex}")
+                        break
+                
                 if not all_ohlcv:
                     continue
+                
+                # Sorteer van oud naar nieuw 
+                all_ohlcv.sort(key=lambda x: int(x[0]))
+                
+                # --- FIX: DEDUPLICATIE ---
+                seen_ts = set()
+                deduped = []
+                for row in all_ohlcv:
+                    ts = int(row[0])
+                    if ts not in seen_ts:
+                        seen_ts.add(ts)
+                        deduped.append(row)
+                        
+                deduped = deduped[-lookback_limit:]
+                # -------------------------
 
-                start_dt = datetime.fromtimestamp(all_ohlcv[0][0] / 1000.0, tz=timezone.utc)
-                end_dt = datetime.fromtimestamp(all_ohlcv[-1][0] / 1000.0, tz=timezone.utc)
+                # FIX: String naar Int conversie toegevoegd vóór de deling door 1000.0!
+                start_dt = datetime.fromtimestamp(int(deduped[0][0]) / 1000.0, tz=timezone.utc)
+                end_dt = datetime.fromtimestamp(int(deduped[-1][0]) / 1000.0, tz=timezone.utc)
                 
                 existing_candles = db.query(Candle.timestamp).filter(
                     Candle.symbol == symbol, Candle.timeframe == timeframe,
@@ -117,8 +124,8 @@ class OKXStreamer:
                 existing_times = {c[0].replace(tzinfo=timezone.utc) if c[0].tzinfo is None else c[0] for c in existing_candles}
                 
                 new_candles = []
-                for data in all_ohlcv:
-                    dt = datetime.fromtimestamp(data[0] / 1000.0, tz=timezone.utc)
+                for data in deduped:
+                    dt = datetime.fromtimestamp(int(data[0]) / 1000.0, tz=timezone.utc)
                     if dt not in existing_times:
                         new_candles.append(Candle(
                             symbol=symbol, timeframe=timeframe, timestamp=dt,
@@ -127,12 +134,18 @@ class OKXStreamer:
                         ))
                 
                 if new_candles:
-                    db.bulk_save_objects(new_candles)
-                    db.commit()
-                
-                print(f"✅ Sync complete for {symbol} ({timeframe}). Fetched {len(all_ohlcv)} rows.")
+                    try:
+                        db.bulk_save_objects(new_candles)
+                        db.commit()
+                        print(f"✅ Sync complete for {symbol} ({timeframe}). Fetched {len(deduped)} rows.")
+                    except Exception as e:
+                        db.rollback()
+                        print(f"❌ DB Opslag Error (Waarschijnlijk Integrity): {e}")
+                else:
+                    print(f"✅ Sync complete for {symbol} ({timeframe}). Data was al up-to-date.")
+
         except Exception as e:
-            print(f"❌ Sync Error: {e}")
+            print(f"❌ Sync Loop Error: {e}")
         finally:
             db.close()
 
@@ -163,7 +176,6 @@ class OKXStreamer:
                     await asyncio.sleep(2)
                     continue
                 
-                # --- FIX: Dit zorgt dat de engine NIET vastloopt tijdens gigantische downloads ---
                 await asyncio.to_thread(self._sync_historical_gaps, subs_dict)
                 
                 args = [{"channel": c, "instId": i} for c, i in subs_dict.keys()]
