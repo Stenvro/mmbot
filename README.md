@@ -28,8 +28,7 @@ This is the **first alpha release** of ApexAlgo.
 - Screen-based runtime management  
 
 ### Limitations:
-- Not production-ready  
-- Incomplete validation and safeguards  
+- Not production-ready 
 - API and schema may change  
 - Limited test coverage  
 
@@ -119,6 +118,7 @@ MASTER_API_KEY=your_secure_master_key
 DATABASE_URL=sqlite:///./data/apexalgo.db
 ENCRYPTION_KEY=your_fernet_key_here
 VITE_API_BASE_URL=https://localhost:8000
+VITE_API_KEY=your_master_api_key_for_the_frontend
 ```
 
 ---
