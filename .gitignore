@@ -9,6 +9,7 @@
 *.db
 *.db3
 data/
+*.log
 
 # --- PYTHON BACKEND ---
 __pycache__/
