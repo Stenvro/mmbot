@@ -96,6 +96,25 @@ else
 fi
 
 ########################################
+# mkcert setup
+########################################
+
+echo ""
+echo "🔐 mkcert Setup"
+
+if ! command_exists mkcert; then
+    apt_install_if_missing libnss3-tools
+    apt_install_if_missing mkcert
+else
+    echo "✔ mkcert already installed"
+fi
+
+if command_exists mkcert; then
+    echo "Installing local CA with mkcert..."
+    mkcert -install || true
+fi
+
+########################################
 # Python virtual environment
 ########################################
 
@@ -163,13 +182,7 @@ if [ ! -d "frontend" ]; then
 fi
 
 cd frontend
-
-if [ -f "package-lock.json" ]; then
-    npm install
-else
-    npm install
-fi
-
+npm install
 cd "$ROOT_DIR"
 
 ########################################
@@ -177,18 +190,37 @@ cd "$ROOT_DIR"
 ########################################
 
 echo ""
-echo "🔐 SSL Setup"
+echo "🔐 SSL Certificate Setup"
 
 mkdir -p "$CERT_DIR"
 
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-    echo "Generating self-signed development certificate..."
-    openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
-        -keyout "$KEY_FILE" \
-        -out "$CERT_FILE" \
-        -days 365 \
-        -subj "/CN=localhost"
-    echo "✅ SSL certificate created at $CERT_FILE"
+    echo "SSL certificate files not found. Generating new development certificates..."
+
+    HOSTS=("localhost" "127.0.0.1" "::1")
+
+    LAN_IPS="$(hostname -I 2>/dev/null || true)"
+    if [ -n "$LAN_IPS" ]; then
+        for ip in $LAN_IPS; do
+            if [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+                HOSTS+=("$ip")
+            fi
+        done
+    fi
+
+    if command_exists mkcert; then
+        echo "Using mkcert for trusted local development certificates..."
+        mkcert -key-file "$KEY_FILE" -cert-file "$CERT_FILE" "${HOSTS[@]}"
+        echo "✅ mkcert certificate created at $CERT_FILE"
+    else
+        echo "⚠ mkcert not available, falling back to OpenSSL self-signed certificate..."
+        openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
+            -keyout "$KEY_FILE" \
+            -out "$CERT_FILE" \
+            -days 365 \
+            -subj "/CN=localhost"
+        echo "✅ OpenSSL certificate created at $CERT_FILE"
+    fi
 else
     echo "✔ SSL certificate already exists"
 fi
@@ -232,6 +264,11 @@ echo ""
 echo "--------------------------------"
 echo "✅ ApexAlgo setup complete"
 echo "--------------------------------"
+echo ""
+echo "If you want to regenerate SSL certificates:"
+echo "1. Delete .cert/cert.pem and .cert/key.pem"
+echo "2. Run ./Setup.sh again"
+echo "3. Restart ApexAlgo"
 echo ""
 echo "Next step:"
 echo "./start_apex.sh"
