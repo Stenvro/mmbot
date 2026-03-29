@@ -155,6 +155,11 @@ export const BotConfigNode = ({ id, data }) => (
         <span className="text-[9px] text-[#848e9c] block mt-1">Auto-stops bot if cumulative drawdown exceeds this %</span>
       </div>
       <div className="pt-2 border-t border-[#2b3139]">
+        <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Max Order Value USD (0 = Off)</label>
+        <input type="number" step="1" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.maxOrderValue !== undefined ? data.maxOrderValue : 0} onChange={(e) => data.onChange(id, 'maxOrderValue', e.target.value === "" ? "" : parseFloat(e.target.value))} />
+        <span className="text-[9px] text-[#848e9c] block mt-1">Safety guard: rejects live orders exceeding this USD value</span>
+      </div>
+      <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Live Execution Mode</label>
         <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode !== undefined ? data.executionMode : "paper"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
           <option value="paper">Paper Trading (Simulated Execution)</option>
@@ -217,7 +222,7 @@ export const ApiKeyNode = ({ id, data }) => (
     <div className="p-4 bg-[#0b0e11]/80 rounded-b">
       <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Select API Credentials</label>
       <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={data.apiKeyName !== undefined ? data.apiKeyName : ""} onChange={(e) => data.onChange(id, 'apiKeyName', e.target.value)}>
-        <option value="" disabled>No key selected (Local Engine)</option>
+        <option value="">No key selected (Local Engine)</option>
         {data.availableKeys?.map(k => (
           <option key={k.name} value={k.name}>{k.name} ({k.is_sandbox ? 'Sandbox' : 'Live'})</option>
         ))}

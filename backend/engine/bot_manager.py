@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+import uuid
 import pandas as pd
 import ccxt
 from datetime import datetime, timezone, timedelta
@@ -256,7 +257,10 @@ class BotManager:
             live_mode = "forward_test"
             if is_api_exec and has_key:
                 api_key = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
-                if api_key: live_mode = "paper" if api_key.is_sandbox else "live"
+                if api_key:
+                    live_mode = "paper" if api_key.is_sandbox else "live"
+                else:
+                    logger.warning("Bot '%s': api_key_name='%s' not found in database. Falling back to forward_test mode.", bot.name, bot.settings.get("api_key_name"))
 
             timeframe = bot.settings.get("timeframe")
             exit_node = bot.settings.get("exit_node")
@@ -352,7 +356,8 @@ class BotManager:
                 # Fee and slippage for realistic backtest P&L
                 bt_trade_settings = bot.settings.get("trade_settings", {})
                 bt_entry_fee = float(bt_trade_settings.get("entry", {}).get("fee", 0)) / 100
-                bt_exit_fee = float(bt_trade_settings.get("exit", {}).get("fee", bt_entry_fee * 100)) / 100
+                raw_exit_fee = bt_trade_settings.get("exit", {}).get("fee")
+                bt_exit_fee = float(raw_exit_fee) / 100 if raw_exit_fee is not None else bt_entry_fee
                 bt_entry_slippage = float(bt_trade_settings.get("entry", {}).get("slippage", 0)) / 100
                 bt_exit_slippage = float(bt_trade_settings.get("exit", {}).get("slippage", 0)) / 100
 
@@ -416,9 +421,9 @@ class BotManager:
                                 realized_pnl = exit_proceeds - entry_cost
                                 open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + realized_pnl
 
-                                # Weighted profit_pct: accumulate based on portion of original position closed
+                                # Weighted profit_pct: accumulate based on portion of original position closed (fee-adjusted)
                                 if original_amount and original_amount > 0:
-                                    portion_pct = ((actual_price - open_bt_pos.entry_price) / open_bt_pos.entry_price) * 100
+                                    portion_pct = (realized_pnl / entry_cost) * 100 if entry_cost > 0 else 0.0
                                     weight = close_qty / original_amount
                                     open_bt_pos.profit_pct = (open_bt_pos.profit_pct or 0.0) + (portion_pct * weight)
 
@@ -447,8 +452,26 @@ class BotManager:
                         open_bt_pos.mode = "forward_test"
                         db.query(Order).filter(Order.position_id == open_bt_pos.id).update({"mode": "forward_test"})
                     else:
-                        db.query(Order).filter(Order.position_id == open_bt_pos.id).delete(synchronize_session=False)
-                        db.delete(open_bt_pos)
+                        # Close trailing backtest position at last price instead of deleting
+                        last_price = float(evaluator.df.iloc[-1]['close'])
+                        remaining_qty = open_bt_pos.amount
+                        last_ts = evaluator.df.iloc[-1]['timestamp']
+                        if last_ts.tzinfo is None: last_ts = last_ts.replace(tzinfo=timezone.utc)
+
+                        entry_cost = open_bt_pos.entry_price * remaining_qty * (1 + bt_entry_fee)
+                        exit_proceeds = last_price * remaining_qty * (1 - bt_exit_fee)
+                        final_pnl = exit_proceeds - entry_cost
+
+                        open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + final_pnl
+                        if original_amount and original_amount > 0:
+                            portion_pct = (final_pnl / entry_cost) * 100 if entry_cost > 0 else 0.0
+                            weight = remaining_qty / original_amount
+                            open_bt_pos.profit_pct = (open_bt_pos.profit_pct or 0.0) + (portion_pct * weight)
+
+                        open_bt_pos.status = "closed"
+                        open_bt_pos.closed_at = last_ts
+                        db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=last_price, amount=remaining_qty, timestamp=last_ts, status="filled"))
+
                         if open_bt_pos.id in self.position_states:
                             del self.position_states[open_bt_pos.id]
 
@@ -545,6 +568,17 @@ class BotManager:
                         api_key_record = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
                         if api_key_record:
                             mode = "paper" if api_key_record.is_sandbox else "live"
+                        else:
+                            logger.warning("Bot '%s': api_key_name='%s' not found. Running as forward_test.", bot.name, bot.settings.get("api_key_name"))
+
+                    # Cache exchange instance per bot cycle to avoid repeated connections
+                    _cached_exchange = None
+                    def get_exchange():
+                        nonlocal _cached_exchange
+                        if _cached_exchange is None and api_key_record:
+                            _cached_exchange = self._get_ccxt_instance(api_key_record)
+                            _cached_exchange.load_markets()
+                        return _cached_exchange
 
                     max_pos = int(bot.settings.get("max_positions", 1))
                     scope = bot.settings.get("max_positions_scope", "per_pair")
@@ -590,17 +624,30 @@ class BotManager:
                         else:
                             try:
                                 actual_price = current_price
-                                order_id = f"local_{int(latest_time.timestamp())}"
+                                order_id = f"local_{int(latest_time.timestamp())}_{uuid.uuid4().hex[:8]}"
 
                                 buy_fee = 0.0
                                 if mode in ["paper", "live"] and api_key_record:
-                                    exchange = self._get_ccxt_instance(api_key_record)
-                                    exchange.load_markets()
+                                    exchange = get_exchange()
                                     trade_amount = float(exchange.amount_to_precision(ccxt_symbol, trade_amount))
                                     if trade_amount <= 0:
                                         logger.warning("Trade amount rounded to zero for %s after precision, skipping", ccxt_symbol)
                                         continue
+                                    # Safety guard: reject orders exceeding max_order_value
+                                    max_order_usd = float(bot.settings.get("max_order_value", 0))
+                                    if mode == "live" and max_order_usd > 0:
+                                        order_value_usd = trade_amount * current_price
+                                        if order_value_usd > max_order_usd:
+                                            logger.warning("SAFETY: BUY order $%.2f exceeds max_order_value $%.2f for %s. Skipping.", order_value_usd, max_order_usd, symbol)
+                                            continue
                                     okx_order = exchange.create_market_buy_order(ccxt_symbol, trade_amount)
+                                    logger.info("%s BUY response: id=%s status=%s filled=%s avg=%s fee=%s",
+                                        mode.upper(), okx_order.get("id"), okx_order.get("status"),
+                                        okx_order.get("filled"), okx_order.get("average"), okx_order.get("fee"))
+                                    if okx_order.get("status") != "closed":
+                                        logger.warning("%s BUY not fully filled (status=%s). Recording as canceled.", mode.upper(), okx_order.get("status"))
+                                        db.add(Order(bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, exchange_order_id=okx_order.get("id"), status="canceled"))
+                                        continue
                                     actual_price = okx_order.get("average") or current_price
                                     order_id = okx_order.get("id")
                                     if okx_order.get("fee"):
@@ -647,17 +694,23 @@ class BotManager:
 
                             try:
                                 actual_price = ev['price']
-                                order_id = f"local_{int(latest_time.timestamp())}"
+                                order_id = f"local_{int(latest_time.timestamp())}_{uuid.uuid4().hex[:8]}"
 
                                 actual_fee = 0.0
                                 if mode in ["paper", "live"] and api_key_record:
-                                    exchange = self._get_ccxt_instance(api_key_record)
-                                    exchange.load_markets()
+                                    exchange = get_exchange()
                                     close_qty = float(exchange.amount_to_precision(ccxt_symbol, close_qty))
                                     if close_qty <= 0:
                                         logger.warning("Sell amount rounded to zero for %s after precision, skipping", ccxt_symbol)
                                         continue
                                     okx_order = exchange.create_market_sell_order(ccxt_symbol, close_qty)
+                                    logger.info("%s SELL response: id=%s status=%s filled=%s avg=%s fee=%s",
+                                        mode.upper(), okx_order.get("id"), okx_order.get("status"),
+                                        okx_order.get("filled"), okx_order.get("average"), okx_order.get("fee"))
+                                    if okx_order.get("status") != "closed":
+                                        logger.warning("%s SELL not fully filled (status=%s). Recording as canceled.", mode.upper(), okx_order.get("status"))
+                                        db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=ev['price'], amount=close_qty, timestamp=latest_time, exchange_order_id=okx_order.get("id"), status="canceled"))
+                                        continue
                                     actual_price = okx_order.get("average") or ev['price']
                                     order_id = okx_order.get("id")
                                     if okx_order.get("fee"):
@@ -665,12 +718,16 @@ class BotManager:
 
                                 db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=latest_time, exchange_order_id=order_id, status="filled", fee=actual_fee))
 
-                                realized_pnl = (actual_price - pos.entry_price) * close_qty
+                                # Fee-adjusted P&L: subtract proportional entry fee + exit fee
+                                total_buy_fees = sum((o.fee or 0.0) for o in (pos.orders or []) if o.side == "buy" and o.status == "filled")
+                                entry_fee_portion = total_buy_fees * (close_qty / pos_original_amount) if pos_original_amount > 0 else 0.0
+                                realized_pnl = (actual_price - pos.entry_price) * close_qty - entry_fee_portion - actual_fee
                                 pos.profit_abs = (pos.profit_abs or 0.0) + realized_pnl
 
-                                # Weighted profit_pct: accumulate based on portion of original position
+                                # Weighted profit_pct: fee-adjusted, based on portion of original position
                                 if pos_original_amount > 0:
-                                    portion_pct = ((actual_price - pos.entry_price) / pos.entry_price) * 100
+                                    entry_cost_for_qty = pos.entry_price * close_qty + entry_fee_portion
+                                    portion_pct = (realized_pnl / entry_cost_for_qty) * 100 if entry_cost_for_qty > 0 else 0.0
                                     weight = close_qty / pos_original_amount
                                     pos.profit_pct = (pos.profit_pct or 0.0) + (portion_pct * weight)
 

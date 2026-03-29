@@ -16,13 +16,47 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ## Features
 
-- **Visual Strategy Builder** — construct strategies using logic gates and indicator nodes via a drag-and-drop canvas
-- **Async Execution Engine** — event-driven FastAPI backend with concurrent bot management
-- **Real-Time Market Data** — WebSocket ingestion via CCXT (OKX supported)
-- **Backtesting** — vectorized historical evaluation with PnL, win rate, and profit factor metrics
-- **Risk Management** — tiered TP/SL, ATR trailing stops, trade cooldown, and position limits
-- **Encrypted Key Storage** — exchange API credentials stored with Fernet symmetric encryption
-- **Local HTTPS** — mkcert-based trusted development certificates
+### Strategy Builder
+- **Visual Node Editor** — drag-and-drop canvas with 51+ technical indicators, logic gates, conditions, and action nodes
+- **No-Code Strategy Design** — connect indicator, condition, and logic nodes to build complex entry/exit rules
+- **ReactFlow Graph Serialization** — strategies are compiled to JSON and evaluated per candle
+
+### Execution Engine
+- **Three Execution Modes** — forward test (simulated), paper trading (sandbox API), and live exchange execution
+- **Async Event-Driven Architecture** — FastAPI backend with concurrent bot management via asyncio
+- **Real-Time Market Data** — WebSocket ingestion from OKX with automatic reconnection
+- **CCXT Integration** — exchange-agnostic order execution with market precision handling
+
+### Backtesting
+- **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods
+- **Fee-Adjusted P&L** — entry/exit fees and slippage applied to all profit calculations
+- **Automatic Position Closure** — open positions at backtest end are closed at last price with proper P&L
+
+### Risk Management
+- **Tiered Take Profit / Stop Loss** — multiple TP/SL levels with percentage or fixed close amounts
+- **ATR & Trailing Stops** — dynamic stop-loss adjustment based on price action
+- **Trade Cooldown** — configurable max entries per N candles
+- **Position Limits** — per-pair or global max concurrent positions
+- **Max Drawdown Auto-Stop** — halts bot when cumulative drawdown exceeds threshold
+- **Max Order Value Guard** — rejects live orders exceeding a configurable USD limit
+
+### Order Safety
+- **Order Fill Validation** — verifies exchange order status after every CCXT call
+- **Unique Order Identification** — UUID-suffixed local order IDs prevent duplicate entries
+- **Exchange Instance Caching** — single CCXT connection per bot cycle for performance
+- **Structured Audit Logging** — order responses logged with id, status, filled amount, and fees
+
+### Security
+- **Fernet Encryption** — exchange API credentials encrypted at rest
+- **Timing-Safe Authentication** — all endpoints require `X-API-Key` with HMAC-based comparison
+- **Local TLS** — mkcert-generated trusted development certificates
+- **Environment Isolation** — secrets auto-generated during setup, never committed
+
+### Analytics
+- **Real-Time Charts** — TradingView lightweight-charts with indicator overlays on correct axis scales
+- **Position & Order Tracking** — detailed P&L, fee tracking, and trade history
+- **Signal Recording** — every entry/exit signal stored with indicator snapshot values
+- **CSV Export** — download trade history for external analysis
 
 ---
 
@@ -49,7 +83,7 @@ VITE_API_BASE_URL=https://<your-ip>:8000
 
 This is pre-filled with your detected LAN IP. Change it if you access ApexAlgo from a different host or network.
 
-### Linux — Ubuntu · Debian · Arch · Raspberry Pi
+### Linux — Ubuntu / Debian / Arch / Raspberry Pi
 
 ```bash
 git clone https://github.com/Stenvro/ApexAlgo.git
@@ -86,7 +120,7 @@ To regenerate SSL certificates, delete `.cert\cert.pem` and `.cert\key.pem` and 
 | :--- | :--- |
 | Backend API | `https://localhost:8000` |
 | Frontend | `https://localhost:5173` |
-| API Docs | `https://localhost:8000/docs` |
+| API Docs (Swagger) | `https://localhost:8000/docs` |
 
 ---
 
@@ -111,22 +145,59 @@ screen -r apex_frontend   # attach to frontend
 ```
 ApexAlgo/
 ├── backend/
-│   ├── core/           # database, encryption, security
-│   ├── engine/         # bot manager, evaluator, websocket streamer
-│   ├── models/         # SQLAlchemy ORM models
-│   ├── routers/        # API route handlers
-│   └── main.py
+│   ├── core/              # database, encryption, security, event bus
+│   ├── engine/
+│   │   ├── bot_manager.py     # core trading engine: backfill, live processing, order execution
+│   │   ├── evaluator.py       # node graph resolver using pandas_ta
+│   │   ├── settings_validator.py  # bot settings integrity checks
+│   │   └── websocket_streamer.py  # OKX WebSocket data ingestion
+│   ├── models/            # SQLAlchemy ORM (BotConfig, Position, Order, Signal, Candle, ExchangeKey)
+│   ├── routers/           # API route handlers (bots, trades, data, keys)
+│   └── main.py            # app init, CORS, lifespan, migrations
 ├── frontend/
 │   └── src/
-│       ├── api/        # axios client
-│       └── components/ # React UI components
-├── data/               # SQLite database (gitignored)
-├── .cert/              # TLS certificates (gitignored)
+│       ├── api/           # axios client with auth interceptor
+│       └── components/
+│           ├── Builder/       # visual strategy editor (BotBuilder, CustomNodes, indicatorConfig)
+│           ├── ChartEngine.jsx    # TradingView charts with indicator overlays
+│           ├── BotManagerUI.jsx   # bot list, start/stop controls
+│           ├── TradeManager.jsx   # position/order analytics, P&L tracking
+│           └── Settings.jsx       # exchange key management
+├── data/                  # SQLite database (gitignored)
+├── .cert/                 # TLS certificates (gitignored)
 ├── requirements.txt
-├── Setup.sh               # Linux setup
-├── Start_ApexAlgo.sh      # Linux start
-├── Setup.ps1              # Windows setup
-└── Start_ApexAlgo.ps1     # Windows start
+├── Setup.sh / Setup.ps1           # one-command setup (Linux / Windows)
+└── Start_ApexAlgo.sh / .ps1       # one-command start (Linux / Windows)
+```
+
+---
+
+## Data Flow
+
+```
+Strategy Builder (ReactFlow) ──serialize──> Bot Settings JSON
+                                                │
+                                          POST /api/bots/
+                                                │
+                                        Settings Validator
+                                                │
+                                           Save to DB
+                                                │
+                                     Bot Start ──> Backfill (historical backtest)
+                                                │
+                                     WebSocket ──> CANDLE_CLOSED event
+                                                │
+                                     NodeEvaluator resolves indicator → condition → logic
+                                                │
+                                     BotManager processes entries/exits
+                                                │
+                          ┌─────────────────────┼─────────────────────┐
+                    Forward Test           Paper (Sandbox)          Live Exchange
+                   (local simulation)     (OKX sandbox API)       (OKX production)
+                                                │
+                                     Position + Order + Signal ──> DB
+                                                │
+                                     ChartEngine + TradeManager ──> UI
 ```
 
 ---
@@ -146,9 +217,11 @@ ApexAlgo/
 ## Security
 
 - Exchange API keys are encrypted at rest using Fernet symmetric encryption
-- All API endpoints require a bearer token (`X-API-Key` header)
+- All API endpoints require a bearer token (`X-API-Key` header) with timing-safe comparison
 - TLS certificates are generated locally via mkcert; `.cert/` is excluded from version control
-- `.env` is excluded from version control
+- `.env` is excluded from version control; secrets are auto-generated during setup
+- Live order execution includes max order value safety guards
+- Order fill status is validated after every exchange API call
 
 ---
 

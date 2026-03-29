@@ -1,12 +1,10 @@
-# --- CLAUDE CODE ---
-CLAUDE.md
-
 # --- SECURITY & CONFIG ---
 .env
 .env.*
 *.pem
 *.key
 .cert/
+CLAUDE.md
 
 # --- DATABASE ---
 *.sqlite

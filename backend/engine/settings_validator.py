@@ -131,6 +131,10 @@ def validate_bot_settings(settings: dict) -> dict:
     if settings.get("api_execution") and not settings.get("api_key_name"):
         errors.append("api_execution is enabled but no api_key_name specified.")
 
+    # API key reference reminder
+    if settings.get("api_key_name"):
+        warnings.append(f"Bot references API key '{settings['api_key_name']}'. Verify this key exists and has correct permissions.")
+
     return {"errors": errors, "warnings": warnings}
 
 
