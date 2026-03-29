@@ -2,7 +2,7 @@ import React from 'react';
 import { Handle, Position } from 'reactflow';
 
 // ==========================================
-// 1. DE ULTIEME INDICATOR DICTIONARY
+// 1. INDICATOR DEFINITIONS
 // ==========================================
 const INDICATOR_GROUPS = {
     "Trend & Overlap": {
@@ -55,7 +55,7 @@ Object.values(INDICATOR_GROUPS).forEach(group => {
 });
 
 // ==========================================
-// CONFIGURATIE BLOKKEN
+// CONFIGURATION NODES
 // ==========================================
 
 export const BotConfigNode = ({ id, data }) => (
@@ -99,7 +99,6 @@ export const BotConfigNode = ({ id, data }) => (
         </select>
       </div>
 
-      {/* --- FIX: TEKST AANGEPAST VOOR ABSOLUTE DUIDELIJKHEID --- */}
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Max New Entries per X Candles (0 = Off)</label>
         <div className="flex space-x-2 items-center">
@@ -108,8 +107,6 @@ export const BotConfigNode = ({ id, data }) => (
             <input type="number" placeholder="Candles" title="Amount of Candles" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.cooldownCandles !== undefined ? data.cooldownCandles : 0} onChange={(e) => data.onChange(id, 'cooldownCandles', e.target.value === "" ? "" : parseInt(e.target.value))} />
         </div>
       </div>
-      {/* -------------------------------------------------------- */}
-
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Live Execution Mode</label>
         <select className="w-full bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.executionMode !== undefined ? data.executionMode : "paper"} onChange={(e) => data.onChange(id, 'executionMode', e.target.value)}>
@@ -183,7 +180,7 @@ export const ApiKeyNode = ({ id, data }) => (
 );
 
 // ==========================================
-// 2. LOGICA & DATA BLOKKEN
+// 2. LOGIC AND DATA NODES
 // ==========================================
 
 export const IndicatorNode = ({ id, data }) => {
@@ -349,7 +346,7 @@ export const LogicNode = ({ id, data }) => {
 };
 
 // ==========================================
-// 3. RISK MANAGEMENT BLOKKEN
+// 3. RISK MANAGEMENT NODES
 // ==========================================
 
 export const StopLossNode = ({ id, data }) => (

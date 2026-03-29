@@ -22,7 +22,7 @@ export default function Home({ setActiveView }) {
     return (
         <div className="w-full min-h-full flex flex-col items-center justify-start md:justify-center relative overflow-y-auto overflow-x-hidden custom-scrollbar bg-[#080a0f] grid-background p-6 pt-24 md:pt-6">
             
-            {/* Subtiele ambient glow in het midden (Geen storende strepen meer) */}
+            {/* Ambient glow */}
             <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#fcd535]/5 rounded-full blur-[120px] pointer-events-none"></div>
             
             <div className="z-10 flex flex-col items-center text-center fade-in max-w-4xl w-full">

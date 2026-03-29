@@ -20,8 +20,7 @@ const nodeTypes = {
 
 const getId = () => `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// Veilige parser die alleen de trigger/close values hard forceert naar numbers, 
-// maar strings met rust laat voor de rest.
+// Parses trigger/close values to floats while leaving other string fields untouched
 const parseSafeFloat = (val) => {
     if (val === "" || val === undefined || val === null) return "";
     const parsed = parseFloat(String(val).replace(',', '.'));
@@ -42,7 +41,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
 
   const updateNodeData = useCallback((id, field, value) => {
     let safeValue = value;
-    // Forceer alleen floating numbers voor risk blocks.
+    // Only coerce numeric fields; leave string fields as-is
     if (field === 'triggerValue' || field === 'closeValue') {
         safeValue = parseSafeFloat(value);
     }
@@ -82,7 +81,6 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
     } else if (!editingBot) {
         setNodes([
             { id: getId(), type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'paper', maxPositions: 1, maxPositionsScope: 'per_pair', cooldownTrades: 0, cooldownCandles: 0 } },
-            // FIX: Startpositie X flink opgeschoven naar 600 zodat brede blokken niet meer overlappen
             { id: getId(), type: 'whitelist', position: { x: 500, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDC' } }
         ]);
         initRef.current = true;
@@ -172,7 +170,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const symbolsList = whitelistNode.data.pairs.split(',').map(s => s.trim()).filter(s => s.length > 0);
         if (symbolsList.length === 0) return showError("Whitelist must contain at least one pair.");
 
-        // We ontdoen de nodes van functies en keys voor opslag
+        // Strip non-serialisable function refs and runtime keys before persisting
         const uiNodesSafe = nodes.map(n => {
             const safeNode = { ...n, data: { ...n.data } };
             delete safeNode.data.onChange;
@@ -376,7 +374,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         </div>
       )}
 
-      {/* --- MOBIELE HEADER (Enkel zichtbaar op mobiel) --- */}
+      {/* Mobile header */}
       <div className="md:hidden flex h-14 bg-[#181a20] border-b border-[#2b3139] items-center justify-between px-4 shrink-0 z-50">
           <button onClick={() => setToolboxOpen(true)} className="flex items-center text-[#fcd535] font-bold uppercase text-[10px] tracking-wider bg-[#fcd535]/10 px-3 py-1.5 rounded border border-[#fcd535]/30">
               <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -388,10 +386,10 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
           </div>
       </div>
 
-      {/* --- MOBIELE OVERLAY VOOR TOOLBOX --- */}
+      {/* Mobile overlay backdrop for toolbox */}
       {toolboxOpen && <div className="fixed inset-0 bg-black/60 z-[105] md:hidden fade-in" onClick={() => setToolboxOpen(false)}></div>}
 
-      {/* LEFT SIDEBAR / TOOLBOX (Op mobiel verbergt deze zich achter de zijkant) */}
+      {/* Left sidebar / toolbox — slides in from the left on mobile */}
       <div className={`fixed md:static inset-y-0 left-0 z-[110] w-72 bg-[#181a20] border-r border-[#2b3139] flex flex-col shadow-2xl md:shadow-lg transform transition-transform duration-300 ease-in-out ${toolboxOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 h-[100dvh]`}>
         <div className="p-4 border-b border-[#2b3139] bg-[#0b0e11]/50 flex justify-between items-center md:block">
           <div>
@@ -452,7 +450,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
           attributionPosition="bottom-right"
         >
           <Background color="#1f2329" gap={20} size={2} />
-          {/* Op mobiel de controls wat omhoog zodat de menubalk niet in de weg zit */}
+          {/* Offset controls upward on mobile to clear the bottom nav bar */}
           <Controls style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', overflow: 'hidden', position: 'absolute', bottom: window.innerWidth < 768 ? '70px' : '20px', left: '20px' }} />
           <MiniMap nodeColor={(node) => '#848e9c'} maskColor="#0b0e11" style={{ backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', display: window.innerWidth < 768 ? 'none' : 'block' }} />
         </ReactFlow>

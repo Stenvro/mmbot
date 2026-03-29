@@ -92,7 +92,6 @@ export default function BotManagerUI({ setError }) {
   };
 
   return (
-    // FIX: pb-32 toegevoegd zodat de pagina op mobiel verder naar beneden scrollt!
     <div className="max-w-6xl mx-auto w-full fade-in space-y-6 relative pb-32 md:pb-10">
       
       {modalConfig && (
@@ -119,7 +118,6 @@ export default function BotManagerUI({ setError }) {
         </div>
       )}
 
-      {/* HEADER */}
       <div className="bg-[#181a20] border border-[#2b3139] px-5 py-4 rounded-sm shadow-sm flex justify-between items-center">
         <div>
           <h3 className="text-[#eaecef] font-bold text-sm uppercase tracking-wider">Trading Algorithms</h3>

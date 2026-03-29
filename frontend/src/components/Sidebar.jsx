@@ -9,8 +9,7 @@ export default function Sidebar({ activeView, setActiveView, openCharts, closeCh
             </h1>
             <p className="text-[#848e9c] text-[9px] mt-0.5 uppercase tracking-wider">Engine Core</p>
         </div>
-        {/* FIX: Geen md:hidden meer, sluitknop werkt overal! */}
-        <button 
+        <button
             onClick={(e) => { e.stopPropagation(); setSidebarOpen(false); }} 
             className="text-[#848e9c] hover:text-[#f6465d] transition-colors p-1"
         >
@@ -47,7 +46,6 @@ export default function Sidebar({ activeView, setActiveView, openCharts, closeCh
           Trade Analytics
         </button>
         
-        {/* RUNNING BOTS */}
         {runningBots && runningBots.length > 0 && (
           <div className="pt-5 pb-2 px-2 flex items-center border-t border-[#2b3139]/50 mt-4">
             <span className="w-1.5 h-1.5 bg-[#2ebd85] rounded-full mr-2 animate-pulse shadow-[0_0_5px_#2ebd85]"></span>
@@ -65,7 +63,6 @@ export default function Sidebar({ activeView, setActiveView, openCharts, closeCh
           </button>
         ))}
 
-        {/* OPEN CHARTS */}
         {openCharts.length > 0 && (
           <div className="pt-5 pb-2 px-2 border-t border-[#2b3139]/50 mt-4">
             <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-widest">Active Charts</span>

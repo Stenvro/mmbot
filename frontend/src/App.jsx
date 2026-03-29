@@ -114,8 +114,7 @@ export default function App() {
     if (activeView === chartId) {
       setActiveView('home');
     }
-    // FIX: De onderstaande regel is verwijderd zodat de sidebar op mobiel netjes open blijft!
-    // if (window.innerWidth < 768) setSidebarOpen(false); 
+    // Intentionally not closing the sidebar here to preserve mobile UX state
   };
 
   const navigateTo = (view) => {

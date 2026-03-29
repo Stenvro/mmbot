@@ -20,11 +20,9 @@ export default function TradeManager({ setError }) {
   
   const [activeTab, setActiveTab] = useState('positions'); 
 
-  // Paginering States
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 150;
 
-  // Live PNL States voor Active Positions
   const [livePrices, setLivePrices] = useState({});
 
   const [filterMode, setFilterMode] = useState('all');
@@ -206,7 +204,7 @@ export default function TradeManager({ setError }) {
         onConfirm: async () => {
             setLoading(true);
             try {
-                // VERZEKERING: Hij mapt over ALLE closedPositions, niet alleen de pagina!
+                // Iterates over ALL closed positions, not just the current page
                 await Promise.all(closedPositions.map(p => apiClient.delete(`/api/trades/positions/${p.id}`)));
                 fetchAllData();
                 setModalConfig(null);

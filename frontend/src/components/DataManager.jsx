@@ -14,7 +14,6 @@ export default function DataManager({ openChart, setError }) {
   const [modalConfig, setModalConfig] = useState(null);
   const [pruneDate, setPruneDate] = useState('');
 
-  // --- FILTERS & PAGINERING ---
   const [filterSymbol, setFilterSymbol] = useState('ALL');
   const [filterTf, setFilterTimeframe] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
@@ -33,7 +32,7 @@ export default function DataManager({ openChart, setError }) {
     fetchSummary();
   }, []);
 
-  // Reset page als filters veranderen
+  // Reset to first page when filters change
   useEffect(() => {
       setCurrentPage(1);
   }, [filterSymbol, filterTf]);
@@ -123,7 +122,6 @@ export default function DataManager({ openChart, setError }) {
     });
   };
 
-  // --- FILTERS & BEREKENINGEN LOGICA ---
   const uniqueSymbols = useMemo(() => [...new Set(summary.map(r => r.symbol))], [summary]);
   const uniqueTimeframes = useMemo(() => [...new Set(summary.map(r => r.timeframe))], [summary]);
 
@@ -227,7 +225,7 @@ export default function DataManager({ openChart, setError }) {
         </div>
       )}
 
-      {/* FILTER/DOWNLOAD BAR - TERMINAL STYLE */}
+      {/* Download bar */}
       <div className="bg-[#181a20] border border-[#2b3139] p-4 md:p-5 rounded-sm shadow-sm transition-all hover:shadow-lg">
         <h3 className="text-[#848e9c] text-[10px] font-bold mb-3 uppercase tracking-wider">Historical Data Engine</h3>
         <form onSubmit={handleDownload} className="flex flex-wrap gap-4 items-end">
@@ -258,10 +256,10 @@ export default function DataManager({ openChart, setError }) {
         </form>
       </div>
 
-      {/* DATA TABLE MET FILTERS EN PAGINATION */}
+      {/* Data table with filters and pagination */}
       <div className="bg-[#181a20] border border-[#2b3139] rounded-sm shadow-sm overflow-hidden flex flex-col h-[600px]">
         
-        {/* Table Headers & Actions */}
+        {/* Table header */}
         <div className="bg-[#0b0e11] px-4 md:px-5 py-3 border-b border-[#2b3139] flex flex-wrap gap-y-3 justify-between items-center shrink-0">
             <div className="flex items-center space-x-3">
                 <span className="text-[10px] text-[#848e9c] font-bold uppercase tracking-wider hidden md:inline">Filter View:</span>
@@ -293,7 +291,7 @@ export default function DataManager({ openChart, setError }) {
             </button>
         </div>
 
-        {/* Scrollable / Swipeable Table Area */}
+        {/* Table body */}
         <div className="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
             <table className="w-full text-left whitespace-nowrap min-w-[700px] relative">
               <thead className="bg-[#0b0e11] border-b border-[#2b3139] text-[9px] text-[#848e9c] uppercase tracking-wider sticky top-0 z-10 shadow-sm">

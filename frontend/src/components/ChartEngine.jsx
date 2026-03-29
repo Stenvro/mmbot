@@ -560,7 +560,7 @@ export default function ChartEngine({ dataset }) {
 
         <div className="flex items-center space-x-2 md:space-x-4 relative"> 
 
-          {/* FIX 2: whitespace-nowrap forceert de "SYNCED: LIVE" tekst op één regel zonder hem te verbergen (geen hidden tags meer!) */}
+          {/* whitespace-nowrap prevents the status label from wrapping on small screens */}
           <div className={`flex items-center space-x-1.5 md:space-x-2 px-2 py-1 md:px-3 md:py-1.5 rounded text-[8px] md:text-xs font-bold tracking-widest border ${isLiveStreamActive ? 'bg-[#2ebd85]/10 text-[#2ebd85] border-[#2ebd85]/30' : 'bg-[#fcd535]/10 text-[#fcd535] border-[#fcd535]/30'}`}> 
             <div className={`w-1.5 h-1.5 md:w-2 md:h-2 rounded-full ${isLiveStreamActive ? 'bg-[#2ebd85] animate-pulse' : 'bg-[#fcd535]'}`}></div> 
             <span className="whitespace-nowrap">{isLiveStreamActive ? 'SYNCED: LIVE' : 'SYNCED: STATIC'}</span> 
