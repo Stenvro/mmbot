@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-echo "⚡ ApexAlgo Setup"
+echo "ApexAlgo Setup"
 echo "--------------------------------"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,10 +25,10 @@ apt_install_if_missing() {
     local pkg="$1"
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
         echo "Installing missing package: $pkg"
-        sudo apt-get update
+        sudo apt-get update -qq
         sudo apt-get install -y "$pkg"
     else
-        echo "✔ $pkg already installed"
+        echo "  [ok] $pkg"
     fi
 }
 
@@ -52,66 +52,59 @@ if [ -z "$PYTHON_BIN" ]; then
     echo "Python 3.11 not found. Installing..."
     apt_install_if_missing software-properties-common
     sudo add-apt-repository -y ppa:deadsnakes/ppa || true
-    sudo apt-get update
+    sudo apt-get update -qq
     sudo apt-get install -y python3.11 python3.11-venv python3.11-dev
     PYTHON_BIN="python3.11"
 fi
 
 PY_VERSION="$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')"
-echo "✅ Using Python: $PYTHON_BIN ($PY_VERSION)"
+echo "  [ok] Python $PY_VERSION"
 
 ########################################
 # Node.js check
 ########################################
 
 if ! command_exists node; then
-    echo "❌ Node.js is not installed."
+    echo "ERROR: Node.js is not installed. Install Node.js 18+ and re-run this script."
     exit 1
 fi
 
-NODE_VERSION="$(node -v)"
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-
 if [ "$NODE_MAJOR" -lt 18 ]; then
-    echo "❌ Node.js 18+ required. Found $NODE_VERSION"
+    echo "ERROR: Node.js 18+ required. Found $(node -v)."
     exit 1
 fi
 
-echo "✅ Node version OK ($NODE_VERSION)"
+echo "  [ok] Node.js $(node -v)"
 
 ########################################
 # Required system tools
 ########################################
 
-if ! command_exists screen; then
-    apt_install_if_missing screen
-else
-    echo "✔ screen already installed"
-fi
-
-if ! command_exists openssl; then
-    apt_install_if_missing openssl
-else
-    echo "✔ openssl already installed"
-fi
+for tool in screen openssl; do
+    if ! command_exists "$tool"; then
+        apt_install_if_missing "$tool"
+    else
+        echo "  [ok] $tool"
+    fi
+done
 
 ########################################
 # mkcert setup
 ########################################
 
 echo ""
-echo "🔐 mkcert Setup"
+echo "SSL (mkcert)"
 
 if ! command_exists mkcert; then
     apt_install_if_missing libnss3-tools
     apt_install_if_missing mkcert
 else
-    echo "✔ mkcert already installed"
+    echo "  [ok] mkcert"
 fi
 
 if command_exists mkcert; then
-    echo "Installing local CA with mkcert..."
-    mkcert -install || true
+    mkcert -install 2>/dev/null || true
 fi
 
 ########################################
@@ -119,84 +112,78 @@ fi
 ########################################
 
 echo ""
-echo "🐍 Python Environment"
+echo "Python environment"
 
 RECREATE_VENV=0
 
 if [ -d "$VENV_DIR" ]; then
     if [ -x "$VENV_DIR/bin/python" ]; then
         VENV_PY_VERSION="$("$VENV_DIR/bin/python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-        echo "Detected existing venv Python: $VENV_PY_VERSION"
-
         if [ "$VENV_PY_VERSION" != "3.11" ]; then
-            echo "⚠ Existing venv uses Python $VENV_PY_VERSION, but ApexAlgo requires Python 3.11."
-            echo "Recreating venv with Python 3.11..."
+            echo "  Existing venv uses Python $VENV_PY_VERSION — recreating with Python 3.11..."
             RECREATE_VENV=1
+        else
+            echo "  [ok] venv (Python $VENV_PY_VERSION)"
         fi
     else
-        echo "⚠ Existing venv is invalid. Recreating..."
+        echo "  Existing venv is invalid — recreating..."
         RECREATE_VENV=1
     fi
 else
-    echo "No venv found. Creating one..."
     RECREATE_VENV=1
 fi
 
 if [ "$RECREATE_VENV" -eq 1 ]; then
     rm -rf "$VENV_DIR"
     "$PYTHON_BIN" -m venv "$VENV_DIR"
-    echo "✅ Created fresh venv: $VENV_DIR"
-else
-    echo "✔ existing venv is compatible"
+    echo "  [ok] venv created"
 fi
 
 source "$VENV_DIR/bin/activate"
-
-python --version
-pip install --upgrade pip setuptools wheel
+pip install --upgrade pip setuptools wheel -q
 
 ########################################
 # Backend dependencies
 ########################################
 
 echo ""
-echo "📦 Backend dependencies"
+echo "Backend dependencies"
 
 if [ ! -f "requirements.txt" ]; then
-    echo "❌ requirements.txt not found in project root."
+    echo "ERROR: requirements.txt not found."
     exit 1
 fi
 
-pip install -r requirements.txt
+pip install -r requirements.txt -q
+echo "  [ok] requirements installed"
 
 ########################################
 # Frontend dependencies
 ########################################
 
 echo ""
-echo "⚛️ Frontend Setup"
+echo "Frontend dependencies"
 
 if [ ! -d "frontend" ]; then
-    echo "❌ frontend directory not found."
+    echo "ERROR: frontend/ directory not found."
     exit 1
 fi
 
 cd frontend
-npm install
+npm install --silent
 cd "$ROOT_DIR"
+echo "  [ok] npm packages installed"
 
 ########################################
-# SSL certificate generation
+# SSL certificates
 ########################################
 
 echo ""
-echo "🔐 SSL Certificate Setup"
+echo "SSL certificates"
 
 mkdir -p "$CERT_DIR"
 
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-    echo "SSL certificate files not found. Generating new development certificates..."
-
     HOSTS=("localhost" "127.0.0.1" "::1")
 
     LAN_IPS="$(hostname -I 2>/dev/null || true)"
@@ -209,40 +196,48 @@ if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
     fi
 
     if command_exists mkcert; then
-        echo "Using mkcert for trusted local development certificates..."
-        mkcert -key-file "$KEY_FILE" -cert-file "$CERT_FILE" "${HOSTS[@]}"
-        echo "✅ mkcert certificate created at $CERT_FILE"
+        mkcert -key-file "$KEY_FILE" -cert-file "$CERT_FILE" "${HOSTS[@]}" 2>/dev/null
+        echo "  [ok] mkcert certificate generated"
     else
-        echo "⚠ mkcert not available, falling back to OpenSSL self-signed certificate..."
         openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
             -keyout "$KEY_FILE" \
             -out "$CERT_FILE" \
             -days 365 \
-            -subj "/CN=localhost"
-        echo "✅ OpenSSL certificate created at $CERT_FILE"
+            -subj "/CN=localhost" 2>/dev/null
+        echo "  [ok] OpenSSL certificate generated (self-signed fallback)"
     fi
 else
-    echo "✔ SSL certificate already exists"
+    echo "  [ok] certificates already present"
 fi
 
 ########################################
-# .env preservation
+# Environment file
 ########################################
 
 echo ""
-echo "⚙️ Environment file"
+echo "Environment"
 
 if [ -f ".env" ]; then
-    echo "✔ .env already exists - leaving it untouched"
+    echo "  [ok] .env already exists — leaving untouched"
 else
+    # Generate secure keys automatically using the installed venv
+    GENERATED_API_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    GENERATED_ENC_KEY=$("$VENV_DIR/bin/python" -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+
+    # Detect primary LAN IP for VITE_API_BASE_URL
+    PRIMARY_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    API_BASE_URL="https://${PRIMARY_IP:-localhost}:8000"
+
     cat > .env <<EOF
-MASTER_API_KEY=change_me
+MASTER_API_KEY=${GENERATED_API_KEY}
 DATABASE_URL=sqlite:///./data/apexalgo.db
-ENCRYPTION_KEY=change_me
-VITE_API_BASE_URL=https://localhost:8000
+ENCRYPTION_KEY=${GENERATED_ENC_KEY}
+VITE_API_BASE_URL=${API_BASE_URL}
+VITE_API_KEY=${GENERATED_API_KEY}
 EOF
-    echo "✅ .env created"
-    echo "⚠ Please edit .env and set your real values"
+    echo "  [ok] .env created with auto-generated keys"
+    echo "  NOTE: VITE_API_BASE_URL is set to ${API_BASE_URL}"
+    echo "        Update this in .env if your backend runs on a different host."
 fi
 
 ########################################
@@ -252,23 +247,22 @@ fi
 mkdir -p data
 
 ########################################
-# Firewall info
+# Make start script executable
+########################################
+
+chmod +x Start_ApexAlgo.sh
+
+########################################
+# Done
 ########################################
 
 echo ""
-echo "🌐 Ports"
-echo "Backend : 8000"
-echo "Frontend: 5173"
-
-echo ""
 echo "--------------------------------"
-echo "✅ ApexAlgo setup complete"
-echo "--------------------------------"
-echo ""
-echo "If you want to regenerate SSL certificates:"
-echo "1. Delete .cert/cert.pem and .cert/key.pem"
-echo "2. Run ./Setup.sh again"
-echo "3. Restart ApexAlgo"
+echo "Setup complete."
 echo ""
 echo "Next step:"
-echo "./start_apex.sh"
+echo "  ./Start_ApexAlgo.sh"
+echo ""
+echo "To regenerate SSL certificates:"
+echo "  Delete .cert/cert.pem and .cert/key.pem, then re-run ./Setup.sh"
+echo "--------------------------------"

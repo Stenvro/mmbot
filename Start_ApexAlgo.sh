@@ -8,23 +8,53 @@ cd "$ROOT_DIR"
 CERT_FILE=".cert/cert.pem"
 KEY_FILE=".cert/key.pem"
 
-if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-    echo "❌ SSL certificate files not found:"
-    echo "   $CERT_FILE"
-    echo "   $KEY_FILE"
-    echo ""
-    echo "Run ./Setup.sh first."
-    exit 1
+########################################
+# Pre-flight checks
+########################################
+
+ABORT=0
+
+if [ ! -f ".env" ]; then
+    echo "ERROR: .env not found. Run ./Setup.sh first."
+    ABORT=1
 fi
 
 if [ ! -d "apexalgo_venv" ]; then
-    echo "❌ Virtual environment not found. Run ./Setup.sh first."
+    echo "ERROR: Virtual environment not found. Run ./Setup.sh first."
+    ABORT=1
+fi
+
+if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+    echo "ERROR: SSL certificate files not found. Run ./Setup.sh first."
+    ABORT=1
+fi
+
+if [ "$ABORT" -eq 1 ]; then
     exit 1
 fi
 
-echo "🚀 Starting APEX ALGO in Screen sessions..."
+if grep -q "change_me" .env 2>/dev/null; then
+    echo "WARNING: .env contains placeholder values. Edit .env before starting."
+    exit 1
+fi
 
-echo "-> Starting Backend in screen 'apex_backend'..."
+########################################
+# Stop any existing sessions
+########################################
+
+for session in apex_backend apex_frontend; do
+    if screen -list | grep -q "$session"; then
+        echo "Stopping existing session: $session"
+        screen -S "$session" -X quit 2>/dev/null || true
+    fi
+done
+
+########################################
+# Start services
+########################################
+
+echo "Starting ApexAlgo..."
+
 screen -dmS apex_backend bash -c "
 cd '$ROOT_DIR' &&
 source apexalgo_venv/bin/activate &&
@@ -36,23 +66,29 @@ uvicorn backend.main:app \
 exec bash
 "
 
-echo "-> Starting Frontend in screen 'apex_frontend'..."
 screen -dmS apex_frontend bash -c "
 cd '$ROOT_DIR/frontend' &&
 npm run dev -- --host 0.0.0.0;
 exec bash
 "
 
-echo "------------------------------------------------"
-echo "✅ APEX ALGO IS LIVE IN SCREEN SESSIONS!"
-echo "------------------------------------------------"
-echo "👉 View Backend  : screen -r apex_backend"
-echo "👉 View Frontend : screen -r apex_frontend"
+########################################
+# Done
+########################################
+
+# Read VITE_API_BASE_URL from .env for display
+BACKEND_URL=$(grep '^VITE_API_BASE_URL=' .env | cut -d'=' -f2 || echo "https://localhost:8000")
+
 echo ""
-echo "Backend URL : https://localhost:8000"
-echo "Frontend URL: https://localhost:5173"
+echo "--------------------------------"
+echo "ApexAlgo is running."
 echo ""
-echo "💡 TIP: How to work with screen sessions?"
-echo " - Detach from a screen (keep it running): Press CTRL + A, release, then press D"
-echo " - Stop the process                      : Enter the screen and press CTRL + C"
-echo "------------------------------------------------"
+echo "  Backend  : ${BACKEND_URL}"
+echo "  Frontend : https://localhost:5173"
+echo "  API Docs : ${BACKEND_URL}/docs"
+echo ""
+echo "  screen -r apex_backend    — attach to backend"
+echo "  screen -r apex_frontend   — attach to frontend"
+echo "  Ctrl+A, D                 — detach (keep running)"
+echo "  Ctrl+C                    — stop process"
+echo "--------------------------------"

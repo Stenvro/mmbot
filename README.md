@@ -37,76 +37,31 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ---
 
-## Quick Setup
+## Setup and Start
 
 ```bash
 git clone https://github.com/Stenvro/ApexAlgo.git
 cd ApexAlgo
-chmod +x Setup.sh
-./Setup.sh
-```
-
-`Setup.sh` will:
-- Detect or install Python 3.11
-- Create the virtual environment (`apexalgo_venv`)
-- Install backend and frontend dependencies
-- Install the local mkcert CA and generate development SSL certificates
-- Create a `.env` file with placeholder values if one does not exist
-
----
-
-## Manual Setup
-
-### 1. Python Virtual Environment
-
-```bash
-python3.11 -m venv apexalgo_venv
-source apexalgo_venv/bin/activate   # Linux / macOS
-# apexalgo_venv\Scripts\activate    # Windows
-pip install -r requirements.txt
-```
-
-### 2. Frontend Dependencies
-
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-### 3. Environment Variables
-
-Create a `.env` file in the project root:
-
-```env
-MASTER_API_KEY=your_secure_master_key
-DATABASE_URL=sqlite:///./data/apexalgo.db
-ENCRYPTION_KEY=your_fernet_key_here
-VITE_API_BASE_URL=https://localhost:8000
-VITE_API_KEY=your_secure_master_key
-```
-
-To generate a valid Fernet encryption key:
-
-```bash
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-### 4. SSL Certificates
-
-Certificates are generated automatically by `Setup.sh` using mkcert. To regenerate manually:
-
-```bash
-mkcert -install
-mkcert -key-file .cert/key.pem -cert-file .cert/cert.pem localhost 127.0.0.1
-```
-
-### 5. Start
-
-```bash
-chmod +x Start_ApexAlgo.sh
+bash Setup.sh
 ./Start_ApexAlgo.sh
 ```
+
+`Setup.sh` handles everything in one run:
+- Detects or installs Python 3.11
+- Creates the virtual environment and installs all dependencies
+- Installs Node.js packages for the frontend
+- Installs the mkcert local CA and generates development SSL certificates
+- Creates a `.env` file with **auto-generated secure keys** — no manual key generation needed
+
+After setup, only one value in `.env` may need editing:
+
+```env
+VITE_API_BASE_URL=https://<your-ip>:8000
+```
+
+This is pre-filled with your detected LAN IP. Change it if you access ApexAlgo from a different host or network. All other values are generated automatically and require no changes.
+
+To regenerate SSL certificates, delete `.cert/cert.pem` and `.cert/key.pem` and re-run `bash Setup.sh`.
 
 ---
 
@@ -159,13 +114,13 @@ ApexAlgo/
 
 ## Environment Variables
 
-| Variable | Description |
-| :--- | :--- |
-| `MASTER_API_KEY` | Backend authentication key for all API requests |
-| `DATABASE_URL` | SQLAlchemy database connection string |
-| `ENCRYPTION_KEY` | Fernet key used to encrypt exchange API credentials at rest |
-| `VITE_API_BASE_URL` | Backend base URL used by the frontend |
-| `VITE_API_KEY` | API key sent by the frontend on every request |
+| Variable | Description | Auto-generated |
+| :--- | :--- | :--- |
+| `MASTER_API_KEY` | Backend authentication key for all API requests | Yes |
+| `DATABASE_URL` | SQLAlchemy database connection string | Yes |
+| `ENCRYPTION_KEY` | Fernet key used to encrypt exchange API credentials at rest | Yes |
+| `VITE_API_BASE_URL` | Backend base URL used by the frontend | Yes — verify if needed |
+| `VITE_API_KEY` | API key sent by the frontend on every request | Yes |
 
 ---
 
