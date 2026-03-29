@@ -28,30 +28,18 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ## Requirements
 
-| Dependency | Version |
-| :--- | :--- |
-| Python | 3.11+ |
-| Node.js | 18+ |
-| mkcert | latest |
-| screen | any |
+| Dependency | Version | Notes |
+| :--- | :--- | :--- |
+| Python | 3.11+ | |
+| Node.js | 18+ | |
+| mkcert | latest | Installed automatically |
+| screen | any | Linux only |
 
 ---
 
 ## Setup and Start
 
-```bash
-git clone https://github.com/Stenvro/ApexAlgo.git
-cd ApexAlgo
-bash Setup.sh
-./Start_ApexAlgo.sh
-```
-
-`Setup.sh` handles everything in one run:
-- Detects or installs Python 3.11
-- Creates the virtual environment and installs all dependencies
-- Installs Node.js packages for the frontend
-- Installs the mkcert local CA and generates development SSL certificates
-- Creates a `.env` file with **auto-generated secure keys** — no manual key generation needed
+Both setup scripts handle everything in one run: install dependencies, create the Python virtual environment, install packages, generate trusted SSL certificates via mkcert, and create a `.env` file with **auto-generated secure keys**.
 
 After setup, only one value in `.env` may need editing:
 
@@ -59,9 +47,36 @@ After setup, only one value in `.env` may need editing:
 VITE_API_BASE_URL=https://<your-ip>:8000
 ```
 
-This is pre-filled with your detected LAN IP. Change it if you access ApexAlgo from a different host or network. All other values are generated automatically and require no changes.
+This is pre-filled with your detected LAN IP. Change it if you access ApexAlgo from a different host or network.
 
-To regenerate SSL certificates, delete `.cert/cert.pem` and `.cert/key.pem` and re-run `bash Setup.sh`.
+### Linux — Ubuntu · Debian · Arch · Raspberry Pi
+
+```bash
+git clone https://github.com/Stenvro/ApexAlgo.git
+cd ApexAlgo
+chmod +x Setup.sh Start_ApexAlgo.sh
+./Setup.sh
+./Start_ApexAlgo.sh
+```
+
+Services run in detached `screen` sessions (see [Managing Screen Sessions](#managing-screen-sessions) below).
+
+To regenerate SSL certificates, delete `.cert/cert.pem` and `.cert/key.pem` and re-run `./Setup.sh`.
+
+### Windows — PowerShell
+
+```powershell
+git clone https://github.com/Stenvro/ApexAlgo.git
+cd ApexAlgo
+powershell -ExecutionPolicy Bypass -File .\Setup.ps1
+.\Start_ApexAlgo.ps1
+```
+
+`Setup.ps1` uses **winget** to install Python, Node.js, and mkcert if they are not already present.
+
+`Start_ApexAlgo.ps1` opens two separate PowerShell windows — one for the backend, one for the frontend. Close a window to stop that service.
+
+To regenerate SSL certificates, delete `.cert\cert.pem` and `.cert\key.pem` and re-run `.\Setup.ps1`.
 
 ---
 
@@ -76,6 +91,8 @@ To regenerate SSL certificates, delete `.cert/cert.pem` and `.cert/key.pem` and 
 ---
 
 ## Managing Screen Sessions
+
+> Linux only. Windows uses separate PowerShell windows instead.
 
 ApexAlgo runs in detached `screen` sessions.
 
@@ -106,8 +123,10 @@ ApexAlgo/
 ├── data/               # SQLite database (gitignored)
 ├── .cert/              # TLS certificates (gitignored)
 ├── requirements.txt
-├── Setup.sh
-└── Start_ApexAlgo.sh
+├── Setup.sh               # Linux setup
+├── Start_ApexAlgo.sh      # Linux start
+├── Setup.ps1              # Windows setup
+└── Start_ApexAlgo.ps1     # Windows start
 ```
 
 ---
