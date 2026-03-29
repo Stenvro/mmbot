@@ -1,3 +1,6 @@
+# --- CLAUDE CODE ---
+CLAUDE.md
+
 # --- SECURITY & CONFIG ---
 .env
 .env.*
