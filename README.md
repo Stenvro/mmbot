@@ -1,105 +1,72 @@
-# ⚡ ApexAlgo
+# ApexAlgo
+
 > **Advanced Visual Quantitative Trading Framework**
 
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![CCXT](https://img.shields.io/badge/CCXT-Integrated-orange?style=for-the-badge)
+![Status](https://img.shields.io/badge/Status-Alpha-yellow?style=for-the-badge)
 
-> 🚧 **Status: Alpha Release (v0.1.0-alpha.1)**  
-> ApexAlgo is currently in an early development stage.  
-> Features may change, stability is not guaranteed, and breaking changes can occur.  
-> Intended for testing, experimentation, and early feedback.
+ApexAlgo is a full-stack algorithmic trading platform for building, backtesting, and executing systematic trading strategies — without writing code. A node-based visual strategy builder connects directly to a high-performance async execution engine with real-time market data and encrypted exchange key management.
 
----
-
-## 📦 Release
-
-**Version:** `v0.1.0-alpha.1`
-
-This is the **first alpha release** of ApexAlgo.
-
-### Included:
-- FastAPI-based async backend engine  
-- Node-based strategy evaluation system  
-- WebSocket market data ingestion (CCXT)  
-- React + Vite frontend  
-- Local HTTPS development setup  
-- Screen-based runtime management  
-
-### Limitations:
-- Not production-ready 
-- API and schema may change  
-- Limited test coverage  
+> **Alpha release — not production-ready.** APIs and data schemas may change between versions.
 
 ---
 
-## 🛠 Installation
+## Features
 
-Follow the steps below to set up ApexAlgo locally.
+- **Visual Strategy Builder** — construct strategies using logic gates and indicator nodes via a drag-and-drop canvas
+- **Async Execution Engine** — event-driven FastAPI backend with concurrent bot management
+- **Real-Time Market Data** — WebSocket ingestion via CCXT (OKX supported)
+- **Backtesting** — vectorized historical evaluation with PnL, win rate, and profit factor metrics
+- **Risk Management** — tiered TP/SL, ATR trailing stops, trade cooldown, and position limits
+- **Encrypted Key Storage** — exchange API credentials stored with Fernet symmetric encryption
+- **Local HTTPS** — mkcert-based trusted development certificates
 
 ---
 
-## ⚡ Quick Setup (Recommended)
+## Requirements
 
-Run the automated setup script:
+| Dependency | Version |
+| :--- | :--- |
+| Python | 3.11+ |
+| Node.js | 18+ |
+| mkcert | latest |
+| screen | any |
+
+---
+
+## Quick Setup
 
 ```bash
+git clone https://github.com/Stenvro/ApexAlgo.git
+cd ApexAlgo
 chmod +x Setup.sh
 ./Setup.sh
 ```
 
-This will:
-
-- Install Python 3.11 if missing  
-- Create or fix the virtual environment (`apexalgo_venv`)  
-- Install backend dependencies  
-- Install frontend dependencies  
-- Generate SSL certificates (if missing)  
-- Preserve existing `.env` configuration  
+`Setup.sh` will:
+- Detect or install Python 3.11
+- Create the virtual environment (`apexalgo_venv`)
+- Install backend and frontend dependencies
+- Install the local mkcert CA and generate development SSL certificates
+- Create a `.env` file with placeholder values if one does not exist
 
 ---
 
-## 🧪 Manual Setup (Advanced)
+## Manual Setup
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/apexalgo.git
-cd apexalgo
-```
-
----
-
-### 2. Create Python Virtual Environment
-
-Requires **Python 3.11+**
+### 1. Python Virtual Environment
 
 ```bash
-python3 -m venv apexalgo_venv
-```
-
-Activate:
-
-**Linux / macOS**
-```bash
-source apexalgo_venv/bin/activate
-```
-
-**Windows**
-```bash
-apexalgo_venv\Scripts\activate
-```
-
-Install backend dependencies:
-
-```bash
+python3.11 -m venv apexalgo_venv
+source apexalgo_venv/bin/activate   # Linux / macOS
+# apexalgo_venv\Scripts\activate    # Windows
 pip install -r requirements.txt
 ```
 
----
-
-### 3. Install Frontend Dependencies
+### 2. Frontend Dependencies
 
 ```bash
 cd frontend
@@ -107,203 +74,116 @@ npm install
 cd ..
 ```
 
----
+### 3. Environment Variables
 
-### 4. Configure Environment Variables
-
-Create a `.env` file in the root directory:
+Create a `.env` file in the project root:
 
 ```env
 MASTER_API_KEY=your_secure_master_key
 DATABASE_URL=sqlite:///./data/apexalgo.db
 ENCRYPTION_KEY=your_fernet_key_here
 VITE_API_BASE_URL=https://localhost:8000
-VITE_API_KEY=your_master_api_key_for_the_frontend
+VITE_API_KEY=your_secure_master_key
 ```
 
----
-
-### 5. Start ApexAlgo
+To generate a valid Fernet encryption key:
 
 ```bash
-chmod +x start_apex.sh
-./start_apex.sh
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
----
+### 4. SSL Certificates
 
-## 🌐 Access
-
-Backend API:
-```
-https://localhost:8000
-```
-
-Frontend:
-```
-https://localhost:5173
-```
-
----
-
-## 🖥 Managing Screen Sessions
-
-View backend:
+Certificates are generated automatically by `Setup.sh` using mkcert. To regenerate manually:
 
 ```bash
-screen -r apex_backend
+mkcert -install
+mkcert -key-file .cert/key.pem -cert-file .cert/cert.pem localhost 127.0.0.1
 ```
 
-View frontend:
+### 5. Start
 
 ```bash
-screen -r apex_frontend
-```
-
-Detach (leave running):
-
-```
-CTRL + A → D
-```
-
-Stop process:
-
-```
-CTRL + C
+chmod +x Start_ApexAlgo.sh
+./Start_ApexAlgo.sh
 ```
 
 ---
 
-## 🔐 HTTPS (Development)
+## Access
 
-ApexAlgo uses **self-signed SSL certificates** for local development.
-
-- Stored in `.cert/`
-- Generated automatically by `Setup.sh`
-- Used by both backend and frontend (Vite config)
-
----
-
-## 🚀 Technical Core Capabilities
-
-### 1. Visual Logic Synthesis (Node-Based UI)
-The frontend utilizes a custom implementation of React Flow to provide a powerful visual canvas for strategy architecture.
-
-* **Logical Gate Primitives:** Integrate `AND`, `OR`, `XOR`, and `NOT` gates to create multi-conditioned entry and exit signals.  
-* **Data Pipeline Routing:** Direct technical indicator outputs (SMA, EMA, RSI, MACD, etc.) through conditional operators.  
-* **Modular Design:** Strategies are saved as structured JSON schemas.  
+| Service | URL |
+| :--- | :--- |
+| Backend API | `https://localhost:8000` |
+| Frontend | `https://localhost:5173` |
+| API Docs | `https://localhost:8000/docs` |
 
 ---
 
-### 2. High-Performance Execution Engine
-The backend is a high-concurrency event-driven system built on FastAPI and Python 3.11+.
+## Managing Screen Sessions
 
-* **Asynchronous Market Ingestion:** Real-time data via WebSockets and CCXT  
-* **Vectorized Evaluation:** High-speed processing using Pandas  
-* **Multi-Asset Management:** Multiple symbols and timeframes per bot  
+ApexAlgo runs in detached `screen` sessions.
 
----
+```bash
+screen -r apex_backend    # attach to backend
+screen -r apex_frontend   # attach to frontend
+```
 
-### 3. Institutional Risk Management
-
-* **Tiered Exits:** Multiple TP/SL levels  
-* **ATR Trailing:** Volatility-based trailing stops  
-* **Trade Cooldown:** Limit entries per candle window  
-* **Position Guarding:** Per-pair or global position limits  
+- **Detach** (keep running): `Ctrl+A` then `D`
+- **Stop process**: `Ctrl+C`
 
 ---
 
-### 4. Vectorized Backtesting & Analytics
+## Architecture
 
-* **Historical Reconstruction:** Backtest large datasets  
-* **Metrics:** Net PnL, Win Rate, Profit Factor  
-* **Execution Ledger:** Full trade history  
-
----
-
-## 🧠 System Architecture
-
-### Backend (Python)
-
-* **BotManager:** Bot lifecycle orchestration  
-* **NodeEvaluator:** Recursive graph execution engine  
-* **SQLAlchemy ORM:** Persistent storage  
-* **Fernet Encryption:** Secure API key storage  
-
-### Frontend (React)
-
-* Real-time WebSocket dashboard  
-* Node-based strategy builder  
-* Interactive charting  
-
----
-
-## 📂 Directory Structure
-
-```text
+```
 ApexAlgo/
 ├── backend/
-│   ├── core/
-│   ├── engine/
-│   ├── models/
-│   ├── routes/
+│   ├── core/           # database, encryption, security
+│   ├── engine/         # bot manager, evaluator, websocket streamer
+│   ├── models/         # SQLAlchemy ORM models
+│   ├── routers/        # API route handlers
 │   └── main.py
 ├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── Builder/
-│   │   └── api/
-│   └── package.json
-├── data/
-├── .cert/
+│   └── src/
+│       ├── api/        # axios client
+│       └── components/ # React UI components
+├── data/               # SQLite database (gitignored)
+├── .cert/              # TLS certificates (gitignored)
 ├── requirements.txt
 ├── Setup.sh
-├── start_apex.sh
-└── README.md
+└── Start_ApexAlgo.sh
 ```
 
 ---
 
-## ⚙️ Environment Configuration
+## Environment Variables
 
 | Variable | Description |
 | :--- | :--- |
-| `MASTER_API_KEY` | Backend authentication key |
-| `DATABASE_URL` | Database connection string |
-| `ENCRYPTION_KEY` | Fernet encryption key |
-| `VITE_API_BASE_URL` | Backend API endpoint |
+| `MASTER_API_KEY` | Backend authentication key for all API requests |
+| `DATABASE_URL` | SQLAlchemy database connection string |
+| `ENCRYPTION_KEY` | Fernet key used to encrypt exchange API credentials at rest |
+| `VITE_API_BASE_URL` | Backend base URL used by the frontend |
+| `VITE_API_KEY` | API key sent by the frontend on every request |
 
 ---
 
-## 🛡️ Security Protocol
+## Security
 
-* API keys are encrypted at rest  
-* Strategies validated before execution  
-* Token-based API access  
-
----
-
-## ⚠️ Disclaimer
-
-ApexAlgo is experimental trading software.
-
-Algorithmic trading involves significant financial risk.  
-Use at your own risk.
+- Exchange API keys are encrypted at rest using Fernet symmetric encryption
+- All API endpoints require a bearer token (`X-API-Key` header)
+- TLS certificates are generated locally via mkcert; `.cert/` is excluded from version control
+- `.env` is excluded from version control
 
 ---
 
-## 🧪 Development Notes
+## Disclaimer
 
-This is an **alpha release** focused on:
-
-- Architecture validation  
-- Strategy engine design  
-- Performance testing  
-
-Expect:
-
-- Breaking changes  
-- Rapid iteration  
-- Incomplete features  
+ApexAlgo is experimental software. Algorithmic trading carries significant financial risk. This project is provided as-is, without warranty of any kind. Use at your own risk.
 
 ---
+
+## License
+
+This project does not currently have an open-source license. All rights reserved.
