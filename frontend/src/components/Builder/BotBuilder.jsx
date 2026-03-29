@@ -100,7 +100,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#848e9c', strokeWidth: 2 } }, eds)), [setEdges]);
   const onDragOver = useCallback((event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
 
-  const getDefaultData = (type) => {
+  const getDefaultData = useCallback((type) => {
       const defaultData = { onChange: updateNodeData, onDelete: deleteNode };
       if (type === 'apiKey') defaultData.availableKeys = availableKeys;
       if (type === 'indicator') { defaultData.indicator = 'rsi'; defaultData.params = {length: 14}; defaultData.outputIdx = 0; }
@@ -110,12 +110,12 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       if (type === 'botConfig') { defaultData.botName = 'My Bot'; defaultData.timeframe = '1m'; defaultData.executionMode = 'paper'; defaultData.maxPositions = 1; defaultData.maxPositionsScope = 'per_pair'; defaultData.cooldownTrades = 0; defaultData.cooldownCandles = 0; }
       if (type === 'whitelist') defaultData.pairs = 'BTC/USDT';
       if (type === 'backtest') { defaultData.runOnStart = true; defaultData.capital = 1000; defaultData.lookback = 150; }
-      if (type === 'stopLoss' || type === 'takeProfit') { 
-          defaultData.triggerType = 'percentage'; defaultData.triggerValue = ''; 
+      if (type === 'stopLoss' || type === 'takeProfit') {
+          defaultData.triggerType = 'percentage'; defaultData.triggerValue = '';
           defaultData.closeType = 'percentage'; defaultData.closeValue = 100;
       }
-      if (type === 'action') { 
-          defaultData.actionType = 'buy'; 
+      if (type === 'action') {
+          defaultData.actionType = 'buy';
           defaultData.orderType = 'market';
           defaultData.amountType = 'percentage';
           defaultData.amountValue = 100;
@@ -123,7 +123,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
           defaultData.fee = 0.1;
       }
       return defaultData;
-  };
+  }, [updateNodeData, deleteNode, availableKeys]);
 
   const onDrop = useCallback(
     (event) => {
@@ -135,7 +135,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
       const newNode = { id: getId(), type, position, data: getDefaultData(type) };
       setNodes((nds) => [...nds, newNode]);
     },
-    [reactFlowInstance, availableKeys, updateNodeData, deleteNode, setNodes]
+    [reactFlowInstance, getDefaultData, setNodes]
   );
 
   const onDragStart = (event, nodeType) => {
@@ -453,7 +453,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
           <Background color="#1f2329" gap={20} size={2} />
           {/* Offset controls upward on mobile to clear the bottom nav bar */}
           <Controls style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', overflow: 'hidden', position: 'absolute', bottom: window.innerWidth < 768 ? '70px' : '20px', left: '20px' }} />
-          <MiniMap nodeColor={(node) => '#848e9c'} maskColor="#0b0e11" style={{ backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', display: window.innerWidth < 768 ? 'none' : 'block' }} />
+          <MiniMap nodeColor={() => '#848e9c'} maskColor="#0b0e11" style={{ backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', display: window.innerWidth < 768 ? 'none' : 'block' }} />
         </ReactFlow>
       </div>
     </div>

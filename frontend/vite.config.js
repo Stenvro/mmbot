@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const certPath = path.resolve(__dirname, '../.cert/cert.pem')
 const keyPath = path.resolve(__dirname, '../.cert/key.pem')
 

@@ -1,14 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { apiClient } from '../api/client';
 
 export default function DataManager({ openChart, setError }) {
   const [summary, setSummary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncingSymbol, setSyncingSymbol] = useState(null);
-  
+
   const [symbol, setSymbol] = useState('BTC-USDC');
-  const [timeframe, setTimeframe] = useState('1d'); 
-  const [startDate, setStartDate] = useState('2024-01-01T00:00'); 
+  const [timeframe, setTimeframe] = useState('1d');
+  const [startDate, setStartDate] = useState('2024-01-01T00:00');
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 16));
 
   const [modalConfig, setModalConfig] = useState(null);
@@ -19,23 +19,28 @@ export default function DataManager({ openChart, setError }) {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 50;
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       const response = await apiClient.get('/api/data/summary');
       setSummary(response.data);
     } catch (err) {
       if (setError) setError(err.message);
     }
-  };
+  }, [setError]);
 
   useEffect(() => {
-    fetchSummary();
-  }, []);
+    fetchSummary(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
+  }, [fetchSummary]);
 
   // Reset to first page when filters change
-  useEffect(() => {
+  const handleFilterSymbol = useCallback((val) => {
+      setFilterSymbol(val);
       setCurrentPage(1);
-  }, [filterSymbol, filterTf]);
+  }, []);
+  const handleFilterTimeframe = useCallback((val) => {
+      setFilterTimeframe(val);
+      setCurrentPage(1);
+  }, []);
 
   const handleDownload = async (e) => {
     e.preventDefault();
@@ -152,7 +157,7 @@ export default function DataManager({ openChart, setError }) {
                 ));
                 fetchSummary();
                 setModalConfig({ type: 'success', title: 'Database Wiped', message: `Successfully deleted all data matching your filters.`, onConfirm: () => setModalConfig(null) });
-            } catch(e) {
+            } catch {
                 setModalConfig({ type: 'error', title: 'Error', message: 'Failed to delete some data.', onConfirm: () => setModalConfig(null) });
             }
             setLoading(false);
@@ -263,11 +268,11 @@ export default function DataManager({ openChart, setError }) {
         <div className="bg-[#0b0e11] px-4 md:px-5 py-3 border-b border-[#2b3139] flex flex-wrap gap-y-3 justify-between items-center shrink-0">
             <div className="flex items-center space-x-3">
                 <span className="text-[10px] text-[#848e9c] font-bold uppercase tracking-wider hidden md:inline">Filter View:</span>
-                <select value={filterSymbol} onChange={(e) => setFilterSymbol(e.target.value)} className="bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] uppercase font-bold rounded px-2 py-1 outline-none cursor-pointer">
+                <select value={filterSymbol} onChange={(e) => handleFilterSymbol(e.target.value)} className="bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] uppercase font-bold rounded px-2 py-1 outline-none cursor-pointer">
                     <option value="ALL">All Pairs</option>
                     {uniqueSymbols.map(sym => <option key={sym} value={sym}>{sym}</option>)}
                 </select>
-                <select value={filterTf} onChange={(e) => setFilterTimeframe(e.target.value)} className="bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] uppercase font-bold rounded px-2 py-1 outline-none cursor-pointer">
+                <select value={filterTf} onChange={(e) => handleFilterTimeframe(e.target.value)} className="bg-[#181a20] border border-[#2b3139] text-[#eaecef] text-[10px] uppercase font-bold rounded px-2 py-1 outline-none cursor-pointer">
                     <option value="ALL">All Intervals</option>
                     {uniqueTimeframes.map(tf => <option key={tf} value={tf}>{tf}</option>)}
                 </select>

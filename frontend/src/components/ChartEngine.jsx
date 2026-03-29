@@ -45,9 +45,7 @@ const formatCrypto = (val) => {
     return Number(val).toFixed(6).replace(/\.?0+$/, '');  
 }; 
 
-export default function ChartEngine({ dataset }) { 
-  if (!dataset || !dataset.symbol) return null; 
-
+export default function ChartEngine({ dataset }) {
   const chartContainerRef = useRef(); 
   const chartRef = useRef(null); 
   const candleSeriesRef = useRef(null); 
@@ -106,8 +104,8 @@ export default function ChartEngine({ dataset }) {
     try { 
       const response = await apiClient.get(`/api/data/market-info/${dataset.symbol.replace('/', '-')}`); 
       setMarketInfo(response.data); 
-    } catch (err) { /* silent */ } 
-  }; 
+    } catch { /* silent */ }
+  };
 
   const initBotConfigs = async () => { 
     try { 
@@ -245,8 +243,8 @@ export default function ChartEngine({ dataset }) {
             lastCandleRef.current = newHoverState; 
         } 
       } 
-    } catch (err) { /* silent */ } 
-  }; 
+    } catch { /* silent */ }
+  };
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -330,9 +328,9 @@ export default function ChartEngine({ dataset }) {
       clearInterval(signalInterval);
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
     };
-  }, [dataset.symbol, dataset.timeframe]); 
+  }, [dataset.symbol, dataset.timeframe]); // eslint-disable-line react-hooks/exhaustive-deps -- chart init must only re-run on symbol/timeframe change
 
-  useEffect(() => { 
+  useEffect(() => {
     if (signals.length === 0) return; 
     setBotConfigs(prev => { 
       let changed = false; 
@@ -341,7 +339,7 @@ export default function ChartEngine({ dataset }) {
         if (!next[sig.bot_name]) return; 
         let parsedExtra = {}; 
 
-        try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch(e){} 
+        try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch { /* silent */ } 
         Object.keys(parsedExtra).forEach(key => { 
            const readableKey = next[sig.bot_name].nodeMap?.[key] || key; 
            if (next[sig.bot_name].indicators[readableKey] === undefined) { 
@@ -364,7 +362,7 @@ export default function ChartEngine({ dataset }) {
       if (!map[snappedTime]) map[snappedTime] = {}; 
       let parsedExtra = {}; 
 
-      try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch (e) {} 
+      try { parsedExtra = typeof sig.extra_data === 'string' ? JSON.parse(sig.extra_data) : (sig.extra_data || {}); } catch { /* silent */ } 
       const config = botConfigs[sig.bot_name]; 
       const mappedExtra = {}; 
       Object.keys(parsedExtra).forEach(k => { 
@@ -436,9 +434,9 @@ export default function ChartEngine({ dataset }) {
     }); 
 
     finalMarkers.sort((a, b) => a.time - b.time); 
-    try { if (markersPluginRef.current) markersPluginRef.current.setMarkers(finalMarkers); } catch (e) {} 
+    try { if (markersPluginRef.current) markersPluginRef.current.setMarkers(finalMarkers); } catch { /* silent */ } 
 
-    priceLinesRef.current.forEach(line => { try { candleSeriesRef.current.removePriceLine(line); } catch(e){} }); 
+    priceLinesRef.current.forEach(line => { try { candleSeriesRef.current.removePriceLine(line); } catch { /* silent */ } }); 
     priceLinesRef.current = []; 
 
     positions.forEach(pos => { 
@@ -457,7 +455,7 @@ export default function ChartEngine({ dataset }) {
                 axisLabelVisible: true, 
                 title: `ENTRY (${isBacktest ? 'BT' : 'LIVE'})`, 
             }; 
-            try { priceLinesRef.current.push(candleSeriesRef.current.createPriceLine(priceLine)); } catch(e) {} 
+            try { priceLinesRef.current.push(candleSeriesRef.current.createPriceLine(priceLine)); } catch { /* silent */ } 
         } 
     }); 
 
@@ -502,7 +500,7 @@ export default function ChartEngine({ dataset }) {
                   } else { 
                       series.applyOptions({ visible: false }); 
                   } 
-                } catch(e) {} 
+                } catch { /* silent */ } 
             } else { 
                 if (indicatorSeriesRef.current[seriesId]) indicatorSeriesRef.current[seriesId].applyOptions({ visible: false }); 
             } 
@@ -534,7 +532,9 @@ export default function ChartEngine({ dataset }) {
     return val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`; 
   }; 
 
-  return ( 
+  if (!dataset || !dataset.symbol) return null;
+
+  return (
     <div className="flex flex-col w-full h-full bg-[#080a0f] rounded-none overflow-hidden"> 
        
       {/* 

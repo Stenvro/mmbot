@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../api/client';
 
 export default function Settings({ setError }) {
@@ -23,7 +23,7 @@ export default function Settings({ setError }) {
   const [swapAmount, setSwapAmount] = useState('');
   const [amountType, setAmountType] = useState('from'); 
 
-  const fetchKeys = async () => {
+  const fetchKeys = useCallback(async () => {
     setRefreshing(true);
     try {
       const response = await apiClient.get('/api/keys');
@@ -33,11 +33,11 @@ export default function Settings({ setError }) {
       if (setError) setError(err.response?.data?.detail || err.message);
     }
     setRefreshing(false);
-  };
+  }, [setError]);
 
   useEffect(() => {
-    fetchKeys();
-  }, []);
+    fetchKeys(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
+  }, [fetchKeys]);
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -129,7 +129,7 @@ export default function Settings({ setError }) {
           try {
               const response = await apiClient.get(`/api/keys/${kName}/balance`);
               setBalances(prev => ({ ...prev, [kName]: response.data.balances }));
-          } catch(e) {}
+          } catch { /* silent */ }
       }
   };
 
@@ -167,7 +167,7 @@ export default function Settings({ setError }) {
               try {
                   const response = await apiClient.get(`/api/keys/${currentWallet}/balance`);
                   setBalances(prev => ({ ...prev, [currentWallet]: response.data.balances }));
-              } catch (balanceErr) {}
+              } catch { /* silent */ }
           }, 1500);
 
       } catch (err) {

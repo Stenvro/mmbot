@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiClient } from '../api/client';
 
 export default function Home({ setActiveView }) {
@@ -14,7 +14,7 @@ export default function Home({ setActiveView }) {
                     positions: posRes.data.filter(p => p.status === 'open').length,
                     balance: 1000 
                 });
-            } catch(e) {}
+            } catch { /* silent */ }
         };
         pingStats();
     }, []);

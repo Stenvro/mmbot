@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import DataManager from './components/DataManager';
 import ChartEngine from './components/ChartEngine';
@@ -47,7 +47,7 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const fetchRunningBots = async () => {
+  const fetchRunningBots = useCallback(async () => {
     try {
       const res = await apiClient.get('/api/bots/');
       const active = res.data.filter(b => b.is_active);
@@ -55,25 +55,25 @@ export default function App() {
     } catch (err) {
       console.error("Silent background fetch error:", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchRunningBots();
+    fetchRunningBots(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
     const botInterval = setInterval(fetchRunningBots, 5000);
-    
+
     const handleOpenBuilder = (e) => {
-        setEditingBot(e.detail || null); 
+        setEditingBot(e.detail || null);
         setShowBuilder(true);
-        if (window.innerWidth < 768) setSidebarOpen(false); 
+        if (window.innerWidth < 768) setSidebarOpen(false);
     };
-    
+
     window.addEventListener('open-builder', handleOpenBuilder);
 
     return () => {
       clearInterval(botInterval);
       window.removeEventListener('open-builder', handleOpenBuilder);
     };
-  }, []);
+  }, [fetchRunningBots]);
 
   const handleOpenChart = (dataset) => {
     const chartId = `${dataset.symbol}_${dataset.timeframe}`;

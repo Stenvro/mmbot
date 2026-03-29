@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { apiClient } from '../api/client';
 
 const safeNum = (val, decimals = 2) => {
@@ -14,7 +14,7 @@ const formatCrypto = (val) => {
 export default function TradeManager({ setError }) {
   const [positions, setPositions] = useState([]);
   const [orders, setOrders] = useState([]); 
-  const [bots, setBots] = useState([]);
+  const [, setBots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalConfig, setModalConfig] = useState(null);
   
@@ -29,59 +29,54 @@ export default function TradeManager({ setError }) {
   const [filterBot, setFilterBot] = useState('all');
   const [filterSymbol, setFilterSymbol] = useState('all');
 
-  const fetchAllData = async () => {
-    setLoading(true);
-    try {
-      const [posRes, botRes, ordRes] = await Promise.all([
-          apiClient.get('/api/trades/positions'),
-          apiClient.get('/api/bots/'),
-          apiClient.get('/api/trades/orders') 
-      ]);
-      setPositions(posRes.data || []);
-      setBots(botRes.data || []);
-      setOrders(ordRes.data || []);
-      if (setError) setError(null);
-      
-      fetchLivePrices(posRes.data || []);
-    } catch (err) {
-      if (setError) setError(err.response?.data?.detail || "Failed to load analytics data.");
-    }
-    setLoading(false);
-  };
-
-  const fetchLivePrices = async (currentPositions) => {
+  const fetchLivePrices = useCallback(async (currentPositions) => {
       const activePos = currentPositions.filter(p => p.status === 'open');
       if (activePos.length === 0) return;
-      
+
       const uniqueSymbols = [...new Set(activePos.map(p => p.symbol))];
-      const priceMap = { ...livePrices };
-      
+      const priceMap = {};
+
       for (const sym of uniqueSymbols) {
           try {
               const res = await apiClient.get(`/api/data/market-info/${sym.replace('/', '-')}`);
               if (res.data && res.data.last) {
                   priceMap[sym] = res.data.last;
               }
-          } catch (e) {} // Silently fail if price fetch fails for one coin
+          } catch { /* silent */ }
       }
-      setLivePrices(priceMap);
-  };
+      setLivePrices(prev => ({ ...prev, ...priceMap }));
+  }, []);
+
+  const fetchAllData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [posRes, botRes, ordRes] = await Promise.all([
+          apiClient.get('/api/trades/positions'),
+          apiClient.get('/api/bots/'),
+          apiClient.get('/api/trades/orders')
+      ]);
+      setPositions(posRes.data || []);
+      setBots(botRes.data || []);
+      setOrders(ordRes.data || []);
+      if (setError) setError(null);
+
+      fetchLivePrices(posRes.data || []);
+    } catch (err) {
+      if (setError) setError(err.response?.data?.detail || "Failed to load analytics data.");
+    }
+    setLoading(false);
+  }, [setError, fetchLivePrices]);
 
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    fetchAllData(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
+  }, [fetchAllData]);
 
   // Separate effect for price polling that tracks positions changes
   useEffect(() => {
     if (positions.length === 0) return;
     const priceInterval = setInterval(() => fetchLivePrices(positions), 10000);
     return () => clearInterval(priceInterval);
-  }, [positions]);
-
-  // Reset page when filters change
-  useEffect(() => {
-      setCurrentPage(1);
-  }, [filterMode, filterBot, filterSymbol, activeTab]);
+  }, [positions, fetchLivePrices]);
 
   const deleteHistoricalTrade = async (id) => {
       setModalConfig({
@@ -94,7 +89,7 @@ export default function TradeManager({ setError }) {
                 await apiClient.delete(`/api/trades/positions/${id}`);
                 fetchAllData();
                 setModalConfig(null);
-            } catch (e) {
+            } catch {
                 setModalConfig({ type: 'error', title: 'Error', message: "Failed to delete trade.", onConfirm: () => setModalConfig(null) });
             }
         },
@@ -212,7 +207,7 @@ export default function TradeManager({ setError }) {
                 await Promise.all(closedPositions.map(p => apiClient.delete(`/api/trades/positions/${p.id}`)));
                 fetchAllData();
                 setModalConfig(null);
-            } catch (e) {
+            } catch {
                 setModalConfig({ type: 'error', title: 'Error', message: "Some trades failed to delete.", onConfirm: () => setModalConfig(null) });
             }
             setLoading(false);
@@ -298,21 +293,21 @@ export default function TradeManager({ setError }) {
           <div className="flex space-x-6 flex-wrap gap-y-3">
               <div className="flex items-center space-x-2">
                   <span className="text-[9px] font-bold text-[#848e9c] uppercase tracking-wider">Algorithm</span>
-                  <select value={filterBot} onChange={e => setFilterBot(e.target.value)} className="bg-transparent text-[#eaecef] text-xs font-bold border-b border-[#2b3139] hover:border-[#848e9c] focus:border-[#fcd535] outline-none cursor-pointer pb-0.5 transition-colors">
+                  <select value={filterBot} onChange={e => { setFilterBot(e.target.value); setCurrentPage(1); }} className="bg-transparent text-[#eaecef] text-xs font-bold border-b border-[#2b3139] hover:border-[#848e9c] focus:border-[#fcd535] outline-none cursor-pointer pb-0.5 transition-colors">
                       <option value="all" className="bg-[#181a20]">All Bots</option>
                       {uniqueBots.map(b => <option key={b} value={b} className="bg-[#181a20]">{b}</option>)}
                   </select>
               </div>
               <div className="flex items-center space-x-2">
                   <span className="text-[9px] font-bold text-[#848e9c] uppercase tracking-wider">Asset</span>
-                  <select value={filterSymbol} onChange={e => setFilterSymbol(e.target.value)} className="bg-transparent text-[#eaecef] text-xs font-bold border-b border-[#2b3139] hover:border-[#848e9c] focus:border-[#fcd535] outline-none cursor-pointer pb-0.5 transition-colors">
+                  <select value={filterSymbol} onChange={e => { setFilterSymbol(e.target.value); setCurrentPage(1); }} className="bg-transparent text-[#eaecef] text-xs font-bold border-b border-[#2b3139] hover:border-[#848e9c] focus:border-[#fcd535] outline-none cursor-pointer pb-0.5 transition-colors">
                       <option value="all" className="bg-[#181a20]">All Pairs</option>
                       {uniqueSymbols.map(s => <option key={s} value={s} className="bg-[#181a20]">{s}</option>)}
                   </select>
               </div>
               <div className="flex items-center space-x-2">
                   <span className="text-[9px] font-bold text-[#848e9c] uppercase tracking-wider">Environment</span>
-                  <select value={filterMode} onChange={e => setFilterMode(e.target.value)} className="bg-transparent text-[#eaecef] text-xs font-bold border-b border-[#2b3139] hover:border-[#848e9c] focus:border-[#fcd535] outline-none cursor-pointer pb-0.5 transition-colors">
+                  <select value={filterMode} onChange={e => { setFilterMode(e.target.value); setCurrentPage(1); }} className="bg-transparent text-[#eaecef] text-xs font-bold border-b border-[#2b3139] hover:border-[#848e9c] focus:border-[#fcd535] outline-none cursor-pointer pb-0.5 transition-colors">
                       <option value="all" className="bg-[#181a20]">All Modes</option>
                       <option value="live" className="bg-[#181a20]">Live Exchange</option>
                       <option value="paper" className="bg-[#181a20]">Paper Trading</option>

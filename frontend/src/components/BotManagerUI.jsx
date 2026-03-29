@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '../api/client';
 
 export default function BotManagerUI({ setError }) {
@@ -6,7 +6,7 @@ export default function BotManagerUI({ setError }) {
   const [loading, setLoading] = useState(true);
   const [modalConfig, setModalConfig] = useState(null);
 
-  const fetchBots = async () => {
+  const fetchBots = useCallback(async () => {
     try {
       const response = await apiClient.get('/api/bots/');
       setBots(response.data);
@@ -15,13 +15,13 @@ export default function BotManagerUI({ setError }) {
       if (setError) setError(err.response?.data?.detail || "Failed to load trading bots.");
     }
     setLoading(false);
-  };
+  }, [setError]);
 
   useEffect(() => {
-    fetchBots();
+    fetchBots(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
     const interval = setInterval(fetchBots, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchBots]);
 
   const toggleBotState = async (botId, isCurrentlyActive) => {
     try {
@@ -72,7 +72,7 @@ export default function BotManagerUI({ setError }) {
                   confirmText: 'OK',
                   onConfirm: () => setModalConfig(null) 
               });
-          } catch (e) {
+          } catch {
               setModalConfig({ type: 'error', title: 'Error', message: "Failed to clear cache.", confirmText: 'OK', onConfirm: () => setModalConfig(null) });
           }
       },
@@ -85,9 +85,9 @@ export default function BotManagerUI({ setError }) {
       setBots(bots.map(b => b.id === botId ? { ...b, ...updates, settings: { ...b.settings, ...(updates.settings || {}) } } : b));
       await apiClient.put(`/api/bots/${botId}`, updates);
       fetchBots();
-    } catch (err) {
+    } catch {
       if (setError) setError("Failed to update bot configuration.");
-      fetchBots(); 
+      fetchBots();
     }
   };
 
