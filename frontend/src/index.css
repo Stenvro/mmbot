@@ -21,17 +21,55 @@ body {
 
 .fade-in { animation: fadeIn 0.4s ease-out forwards; }
 
-/* Subtiele glow achter het logo */
-.glow-panel {
-  box-shadow: 0 0 60px rgba(252, 213, 53, 0.08);
-}
+/* Glow panel variants */
+.glow-panel { box-shadow: 0 0 60px rgba(252, 213, 53, 0.08); }
+.glow-panel-cyan { box-shadow: 0 0 40px rgba(14, 165, 233, 0.06); }
+.glow-panel-green { box-shadow: 0 0 40px rgba(46, 189, 133, 0.06); }
+.glow-panel-purple { box-shadow: 0 0 40px rgba(139, 92, 246, 0.06); }
 
-/* De strakke Bloomberg-stijl grid */
+/* Bloomberg-style grid background */
 .grid-background {
   background-color: #080a0f;
-  background-image: 
+  background-image:
     linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
   background-size: 40px 40px;
   background-position: center center;
 }
+
+/* Page container with grid + ambient glow */
+.page-container {
+  position: relative;
+  min-height: 100%;
+  background-color: #080a0f;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+}
+
+/* Terminal-style card */
+.terminal-card {
+  background: rgba(18, 21, 28, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid #202532;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Staggered fade-in animations */
+.fade-in-delay-1 { animation: fadeIn 0.4s ease-out 0.05s forwards; opacity: 0; }
+.fade-in-delay-2 { animation: fadeIn 0.4s ease-out 0.10s forwards; opacity: 0; }
+.fade-in-delay-3 { animation: fadeIn 0.4s ease-out 0.15s forwards; opacity: 0; }
+.fade-in-delay-4 { animation: fadeIn 0.4s ease-out 0.20s forwards; opacity: 0; }
+.fade-in-delay-5 { animation: fadeIn 0.4s ease-out 0.25s forwards; opacity: 0; }
+.fade-in-delay-6 { animation: fadeIn 0.4s ease-out 0.30s forwards; opacity: 0; }
+
+/* Modal entry animation */
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.95) translateY(5px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-enter { animation: modalIn 0.2s ease-out forwards; }

@@ -541,7 +541,7 @@ export default function ChartEngine({ dataset }) {
         FIX 1: pl-14 md:pl-20 zorgt dat de tekst ALTIJD opzij staat voor de hamburgerknop (zowel mobiel als desktop!)
         Kleuren aangepast naar het strakke donkere thema
       */}
-      <div className="h-14 bg-[#12151c] border-b border-[#202532] flex items-center justify-between pl-14 md:pl-20 pr-4 md:pr-6 shrink-0 relative z-30"> 
+      <div className="h-14 bg-[#12151c]/80 backdrop-blur-xl border-b border-[#202532] flex items-center justify-between pl-14 md:pl-20 pr-4 md:pr-6 shrink-0 relative z-30"> 
         <div className="flex items-center space-x-3 md:space-x-6"> 
           <div className="flex flex-col"> 
             <div className="flex items-center space-x-2"> 
@@ -581,12 +581,12 @@ export default function ChartEngine({ dataset }) {
             <span className="whitespace-nowrap">{isLiveStreamActive ? 'SYNCED: LIVE' : 'SYNCED: STATIC'}</span> 
           </div> 
 
-          <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 rounded-lg bg-[#202532] hover:bg-[#2b3139] transition-colors border border-[#202532] flex items-center justify-center ml-1 md:ml-0"> 
+          <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 rounded-lg bg-[#202532] hover:bg-[#2b3545] transition-all duration-200 border border-[#202532] flex items-center justify-center ml-1 md:ml-0"> 
             <svg className="w-4 h-4 md:w-5 md:h-5 text-[#f1f3f5]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg> 
           </button> 
 
           {showMenu && ( 
-            <div className="absolute top-12 right-0 w-[calc(100vw-2rem)] sm:w-80 max-h-[70vh] overflow-y-auto custom-scrollbar bg-[#12151c] border border-[#202532] rounded-xl shadow-2xl py-2 z-50"> 
+            <div className="absolute top-12 right-0 w-[calc(100vw-2rem)] sm:w-80 max-h-[70vh] overflow-y-auto custom-scrollbar bg-[#12151c]/95 backdrop-blur-xl border border-[#202532] rounded-xl shadow-[0_8px_40px_rgba(0,0,0,0.5)] py-2 z-50"> 
               <div className="px-4 py-3 text-xs font-bold text-[#7d8598] uppercase border-b border-[#202532] mb-1">Algorithm Overlay</div> 
               {Object.keys(botConfigs).length === 0 ? ( 
                 <div className="px-4 py-3 text-xs text-[#7d8598]">No algorithms active on this chart.</div> 
@@ -633,7 +633,7 @@ export default function ChartEngine({ dataset }) {
       </div> 
 
       <div className="flex-1 relative w-full h-full"> 
-        {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]/90 z-20 text-[#fcd535] text-sm tracking-widest animate-pulse">LOADING ENGINE...</div>} 
+        {loading && <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]/90 backdrop-blur-sm z-20"><span className="text-[#fcd535] text-[10px] font-bold tracking-[0.3em] uppercase animate-pulse">Loading Engine...</span></div>} 
         {errorMsg && <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]/90 z-20 text-[#f6465d] font-bold tracking-widest px-6 text-center">{errorMsg}</div>} 
          
         {hoverData && !loading && !errorMsg && ( 

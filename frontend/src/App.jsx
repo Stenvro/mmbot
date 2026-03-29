@@ -125,17 +125,17 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-[100dvh] bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-[#fcd535]/30 overflow-hidden relative">
+    <div className="flex h-[100dvh] bg-[#080a0f] text-[#eaecef] font-sans selection:bg-[#fcd535]/30 overflow-hidden relative">
       
       <button 
-        className={`fixed top-3 left-4 z-[90] p-2 bg-[#181a20]/80 backdrop-blur border border-[#2b3139] hover:border-[#fcd535] rounded shadow-lg text-[#848e9c] hover:text-[#fcd535] transition-all duration-300 ${sidebarOpen ? 'opacity-0 pointer-events-none -translate-x-10' : 'opacity-100 translate-x-0'}`}
+        className={`fixed top-3 left-4 z-[90] p-2 bg-[#12151c]/80 backdrop-blur-xl border border-[#202532] hover:border-[#fcd535] rounded-lg shadow-lg text-[#848e9c] hover:text-[#fcd535] transition-all duration-300 ${sidebarOpen ? 'opacity-0 pointer-events-none -translate-x-10' : 'opacity-100 translate-x-0'}`}
         onClick={() => setSidebarOpen(true)}
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
       </button>
 
       {sidebarOpen && (
-         <div className="fixed inset-0 bg-black/60 z-[70] md:hidden fade-in" onClick={() => setSidebarOpen(false)}></div>
+         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] md:hidden fade-in" onClick={() => setSidebarOpen(false)}></div>
       )}
 
       <Sidebar 
@@ -152,11 +152,12 @@ export default function App() {
       <div className={`flex-1 flex flex-col h-full overflow-hidden relative transition-all duration-300 ease-in-out ${sidebarOpen ? 'md:ml-64' : 'ml-0'}`}>
         
         {['manager', 'settings', 'bots', 'trades'].includes(activeView) && (
-          <header className="h-14 bg-[#181a20] border-b border-[#2b3139] flex items-center justify-between px-4 md:px-6 shrink-0">
+          <header className="h-14 bg-[#12151c]/80 backdrop-blur-xl border-b border-[#202532] flex items-center justify-between px-4 md:px-6 shrink-0 relative">
+            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#fcd535]/20 to-transparent" />
             <div className={`${!sidebarOpen ? 'ml-12 transition-all duration-300' : 'ml-0 transition-all duration-300'}`}>
-              <h2 className="text-xs md:text-sm font-semibold text-[#eaecef] tracking-wide uppercase">
-                {activeView === 'manager' ? 'Market Data Vault' : 
-                 activeView === 'bots' ? 'Trading Algorithms' : 
+              <h2 className="text-xs md:text-sm font-semibold text-[#eaecef] tracking-[0.15em] uppercase">
+                {activeView === 'manager' ? 'Market Data Vault' :
+                 activeView === 'bots' ? 'Trading Algorithms' :
                  activeView === 'trades' ? 'Trade Analytics' :
                  'Exchange Configuration'}
               </h2>
@@ -171,31 +172,23 @@ export default function App() {
           </div>
         )}
 
-        <main className="flex-1 overflow-x-hidden overflow-y-auto flex flex-col relative w-full custom-scrollbar">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto flex flex-col relative w-full custom-scrollbar bg-[#080a0f]">
           
           {activeView === 'home' && (
              <Home setActiveView={navigateTo} />
           )}
 
-          {activeView === 'manager' && (
-             <div className="p-4 md:p-6 w-full fade-in"><DataManager openChart={handleOpenChart} setError={setError} /></div>
-          )}
+          {activeView === 'manager' && <DataManager openChart={handleOpenChart} setError={setError} />}
 
-          {activeView === 'settings' && (
-             <div className="p-4 md:p-6 w-full fade-in"><Settings setError={setError} /></div>
-          )}
+          {activeView === 'settings' && <Settings setError={setError} />}
 
-          {activeView === 'bots' && (
-             <div className="p-4 md:p-6 w-full fade-in"><BotManagerUI setError={setError} /></div>
-          )}
+          {activeView === 'bots' && <BotManagerUI setError={setError} />}
 
-          {activeView === 'trades' && (
-             <div className="p-4 md:p-6 w-full fade-in"><TradeManager setError={setError} /></div>
-          )}
+          {activeView === 'trades' && <TradeManager setError={setError} />}
 
           {openCharts.map(chart => (
             activeView === chart.id && (
-              <div key={chart.id} className="flex-1 w-full h-full relative border-t-0 border border-[#2b3139] fade-in">
+              <div key={chart.id} className="flex-1 w-full h-full relative border-t-0 border border-[#202532] fade-in">
                  <ChartEngine dataset={chart} />
               </div>
             )
@@ -205,7 +198,7 @@ export default function App() {
       </div>
 
       {showBuilder && (
-        <div className="absolute inset-0 z-[100] bg-[#0b0e11] fade-in">
+        <div className="absolute inset-0 z-[100] bg-[#080a0f] fade-in">
            <BotBuilder closeBuilder={() => setShowBuilder(false)} editingBot={editingBot} />
         </div>
       )}

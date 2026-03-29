@@ -3,6 +3,7 @@ import ReactFlow, { MiniMap, Controls, Background, useNodesState, useEdgesState,
 import 'reactflow/dist/style.css';
 import { BotConfigNode, WhitelistNode, BacktestNode, ApiKeyNode, IndicatorNode, ConditionNode, LogicNode, StopLossNode, TakeProfitNode, ActionNode, PriceDataNode } from './CustomNodes';
 import { apiClient } from '../../api/client';
+import Modal from '../ui/Modal';
 
 const nodeTypes = {
   botConfig: BotConfigNode,
@@ -154,7 +155,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   };
 
   const showError = (msg) => {
-      setModalConfig({ type: 'error', title: 'Compile Error', message: msg, onConfirm: () => setModalConfig(null) });
+      setModalConfig({ type: 'danger', title: 'Compile Error', message: msg, confirmText: 'OK', onConfirm: () => setModalConfig(null) });
   };
 
   const handleSaveAndCompile = async () => {
@@ -335,19 +336,21 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
 
         if (editingBot) {
             await apiClient.put(`/api/bots/${editingBot.id}`, { name: payload.name, settings: payload.settings });
-            setModalConfig({ 
-                type: hasLogic ? 'success' : 'warning', 
-                title: hasLogic ? 'Success' : 'Draft Saved', 
-                message: hasLogic ? 'Algorithm Configuration Updated.' : 'Your draft is saved, but has no logic yet. The engine will ignore it until you connect an Entry signal.', 
-                onConfirm: () => { setModalConfig(null); closeBuilder(); } 
+            setModalConfig({
+                type: hasLogic ? 'success' : 'warning',
+                title: hasLogic ? 'Success' : 'Draft Saved',
+                message: hasLogic ? 'Algorithm Configuration Updated.' : 'Your draft is saved, but has no logic yet. The engine will ignore it until you connect an Entry signal.',
+                confirmText: 'OK',
+                onConfirm: () => { setModalConfig(null); closeBuilder(); }
             });
         } else {
             await apiClient.post('/api/bots/', payload);
-            setModalConfig({ 
-                type: hasLogic ? 'success' : 'warning', 
-                title: hasLogic ? 'Compiled' : 'Draft Saved', 
-                message: hasLogic ? 'Algorithm Successfully Compiled & Deployed.' : 'Your draft is saved, but has no logic yet. The engine will ignore it until you connect an Entry signal.', 
-                onConfirm: () => { setModalConfig(null); closeBuilder(); } 
+            setModalConfig({
+                type: hasLogic ? 'success' : 'warning',
+                title: hasLogic ? 'Compiled' : 'Draft Saved',
+                message: hasLogic ? 'Algorithm Successfully Compiled & Deployed.' : 'Your draft is saved, but has no logic yet. The engine will ignore it until you connect an Entry signal.',
+                confirmText: 'OK',
+                onConfirm: () => { setModalConfig(null); closeBuilder(); }
             });
         }
 
@@ -358,81 +361,68 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   };
 
   return (
-    <div className="flex w-full h-[100dvh] bg-[#0b0e11] absolute inset-0 z-[100] fade-in flex-col md:flex-row">
-      
-      {modalConfig && (
-        <div className="fixed inset-0 z-[9999] bg-[#0b0e11]/80 backdrop-blur-sm flex items-center justify-center p-4 fade-in">
-          <div className="bg-[#181a20] border border-[#2b3139] rounded shadow-2xl max-w-sm w-full p-6 relative">
-            <h3 className={`text-lg font-bold mb-2 uppercase tracking-wider ${modalConfig.type === 'success' ? 'text-[#2ebd85]' : modalConfig.type === 'warning' ? 'text-[#fcd535]' : 'text-[#f6465d]'}`}>
-              {modalConfig.title}
-            </h3>
-            <p className="text-[#848e9c] text-sm mb-6 leading-relaxed">{modalConfig.message}</p>
-            <div className="flex justify-end">
-              <button onClick={modalConfig.onConfirm} className={`px-6 py-2 rounded text-xs font-bold uppercase transition-colors ${modalConfig.type === 'success' ? 'bg-[#2ebd85] hover:bg-[#2ebd85]/80 text-[#181a20]' : modalConfig.type === 'warning' ? 'bg-[#fcd535] hover:bg-[#e5c02a] text-[#181a20]' : 'bg-[#f6465d] hover:bg-[#f6465d]/80 text-white'}`}>
-                OK
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+    <div className="flex w-full h-[100dvh] bg-[#080a0f] absolute inset-0 z-[100] fade-in flex-col md:flex-row">
+
+      <Modal config={modalConfig} />
 
       {/* Mobile header */}
-      <div className="md:hidden flex h-14 bg-[#181a20] border-b border-[#2b3139] items-center justify-between px-4 shrink-0 z-50">
-          <button onClick={() => setToolboxOpen(true)} className="flex items-center text-[#fcd535] font-bold uppercase text-[10px] tracking-wider bg-[#fcd535]/10 px-3 py-1.5 rounded border border-[#fcd535]/30">
+      <div className="md:hidden flex h-14 bg-[#12151c]/80 backdrop-blur-xl border-b border-[#202532] items-center justify-between px-4 shrink-0 z-50">
+          <button onClick={() => setToolboxOpen(true)} className="flex items-center text-[#fcd535] font-bold uppercase text-[10px] tracking-wider bg-[#fcd535]/10 px-3 py-1.5 rounded-lg border border-[#fcd535]/30">
               <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
               Toolbox
           </button>
           <div className="flex space-x-3 items-center">
-              <button onClick={closeBuilder} className="text-[#848e9c] hover:text-[#f6465d] font-bold uppercase text-[10px] tracking-wider px-2 py-1.5">Close</button>
-              <button onClick={handleSaveAndCompile} className="bg-[#fcd535] text-[#181a20] px-4 py-1.5 rounded font-bold uppercase text-[10px] tracking-wider shadow-sm">Save</button>
+              <button onClick={closeBuilder} className="text-[#848e9c] hover:text-[#f6465d] font-bold uppercase text-[10px] tracking-wider px-2 py-1.5 transition-colors">Close</button>
+              <button onClick={handleSaveAndCompile} className="bg-[#fcd535] text-[#181a20] px-4 py-1.5 rounded-lg font-bold uppercase text-[10px] tracking-wider shadow-[0_0_15px_rgba(252,213,53,0.15)] hover:shadow-[0_0_25px_rgba(252,213,53,0.25)] hover:bg-[#e5c02a] transition-all duration-200">Save</button>
           </div>
       </div>
 
       {/* Mobile overlay backdrop for toolbox */}
-      {toolboxOpen && <div className="fixed inset-0 bg-black/60 z-[105] md:hidden fade-in" onClick={() => setToolboxOpen(false)}></div>}
+      {toolboxOpen && <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[105] md:hidden fade-in" onClick={() => setToolboxOpen(false)}></div>}
 
       {/* Left sidebar / toolbox — slides in from the left on mobile */}
-      <div className={`fixed md:static inset-y-0 left-0 z-[110] w-72 bg-[#181a20] border-r border-[#2b3139] flex flex-col shadow-2xl md:shadow-lg transform transition-transform duration-300 ease-in-out ${toolboxOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 h-[100dvh]`}>
-        <div className="p-4 border-b border-[#2b3139] bg-[#0b0e11]/50 flex justify-between items-center md:block">
-          <div>
+      <div className={`fixed md:static inset-y-0 left-0 z-[110] w-72 bg-[#12151c]/95 backdrop-blur-xl border-r border-[#202532] flex flex-col shadow-2xl transform transition-transform duration-300 ease-in-out ${toolboxOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 h-[100dvh]`}>
+        <div className="relative p-4 border-b border-[#202532] bg-[#080a0f]/50 flex justify-between items-center md:block overflow-hidden">
+          <div className="absolute -top-8 -left-8 w-32 h-32 rounded-full blur-[60px] bg-[#fcd535]/5 pointer-events-none" />
+          <div className="relative">
             <h2 className="text-[#eaecef] font-bold tracking-wider text-lg">APEX<span className="text-[#fcd535]">ALGO</span></h2>
             <span className="text-[10px] text-[#848e9c] uppercase tracking-widest">{editingBot ? 'Editing Architecture' : 'Algorithm Builder'}</span>
           </div>
-          <button onClick={() => setToolboxOpen(false)} className="md:hidden text-[#848e9c] hover:text-white p-2 font-bold text-lg">✕</button>
+          <button onClick={() => setToolboxOpen(false)} className="md:hidden text-[#848e9c] hover:text-white p-2 font-bold text-lg transition-colors">✕</button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar pb-24 md:pb-5">
             <div className="space-y-3">
-                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#2b3139] pb-1">1. Setup & Context</span>
-                <div className="p-3 bg-[#0b0e11] border border-[#8b5cf6]/50 rounded text-[11px] text-[#8b5cf6] font-bold cursor-pointer md:cursor-grab hover:bg-[#8b5cf6]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'botConfig')} onClick={() => handleAddNodeMobile('botConfig')} draggable>Main Configuration</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#d946ef]/50 rounded text-[11px] text-[#d946ef] font-bold cursor-pointer md:cursor-grab hover:bg-[#d946ef]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'whitelist')} onClick={() => handleAddNodeMobile('whitelist')} draggable>Asset Whitelist</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#fcd535]/50 rounded text-[11px] text-[#fcd535] font-bold cursor-pointer md:cursor-grab hover:bg-[#fcd535]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'backtest')} onClick={() => handleAddNodeMobile('backtest')} draggable>Backtest Engine</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#0ea5e9]/50 rounded text-[11px] text-[#0ea5e9] font-bold cursor-pointer md:cursor-grab hover:bg-[#0ea5e9]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'apiKey')} onClick={() => handleAddNodeMobile('apiKey')} draggable>Exchange Routing</div>
+                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#202532] pb-1">1. Setup & Context</span>
+                <div className="p-3 bg-[#080a0f] border border-[#8b5cf6]/50 rounded-lg text-[11px] text-[#8b5cf6] font-bold cursor-pointer md:cursor-grab hover:bg-[#8b5cf6]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'botConfig')} onClick={() => handleAddNodeMobile('botConfig')} draggable>Main Configuration</div>
+                <div className="p-3 bg-[#080a0f] border border-[#d946ef]/50 rounded-lg text-[11px] text-[#d946ef] font-bold cursor-pointer md:cursor-grab hover:bg-[#d946ef]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'whitelist')} onClick={() => handleAddNodeMobile('whitelist')} draggable>Asset Whitelist</div>
+                <div className="p-3 bg-[#080a0f] border border-[#fcd535]/50 rounded-lg text-[11px] text-[#fcd535] font-bold cursor-pointer md:cursor-grab hover:bg-[#fcd535]/10 transition-colors uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'backtest')} onClick={() => handleAddNodeMobile('backtest')} draggable>Backtest Engine</div>
+                <div className="p-3 bg-[#080a0f] border border-[#0ea5e9]/50 rounded-lg text-[11px] text-[#0ea5e9] font-bold cursor-pointer md:cursor-grab hover:bg-[#0ea5e9]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'apiKey')} onClick={() => handleAddNodeMobile('apiKey')} draggable>Exchange Routing</div>
             </div>
 
             <div className="space-y-3">
-                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#2b3139] pb-1">2. Market Logic</span>
-                <div className="p-3 bg-[#0b0e11] border border-[#2b3139] rounded text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#2b3139]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'indicator')} onClick={() => handleAddNodeMobile('indicator')} draggable>Technical Indicator</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#3b4149] rounded text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#3b4149]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'priceData')} onClick={() => handleAddNodeMobile('priceData')} draggable>Price Data</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#3b4149] rounded text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#3b4149]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'condition')} onClick={() => handleAddNodeMobile('condition')} draggable>Data Condition</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#2ea043]/50 rounded text-[11px] text-[#2ea043] font-bold cursor-pointer md:cursor-grab hover:bg-[#2ea043]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'logic')} onClick={() => handleAddNodeMobile('logic')} draggable>Logic Gate (AND, OR, NOT)</div>
+                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#202532] pb-1">2. Market Logic</span>
+                <div className="p-3 bg-[#080a0f] border border-[#202532] rounded-lg text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#202532]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'indicator')} onClick={() => handleAddNodeMobile('indicator')} draggable>Technical Indicator</div>
+                <div className="p-3 bg-[#080a0f] border border-[#202532] rounded-lg text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#202532]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'priceData')} onClick={() => handleAddNodeMobile('priceData')} draggable>Price Data</div>
+                <div className="p-3 bg-[#080a0f] border border-[#202532] rounded-lg text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#202532]/50 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'condition')} onClick={() => handleAddNodeMobile('condition')} draggable>Data Condition</div>
+                <div className="p-3 bg-[#080a0f] border border-[#2ea043]/50 rounded text-[11px] text-[#2ea043] font-bold cursor-pointer md:cursor-grab hover:bg-[#2ea043]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'logic')} onClick={() => handleAddNodeMobile('logic')} draggable>Logic Gate (AND, OR, NOT)</div>
             </div>
 
             <div className="space-y-3">
-                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#2b3139] pb-1">3. Risk Management</span>
-                <div className="p-3 bg-[#0b0e11] border border-[#2ebd85]/50 rounded text-[11px] text-[#2ebd85] font-bold cursor-pointer md:cursor-grab hover:bg-[#2ebd85]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'takeProfit')} onClick={() => handleAddNodeMobile('takeProfit')} draggable>Take Profit (Target)</div>
-                <div className="p-3 bg-[#0b0e11] border border-[#f6465d]/50 rounded text-[11px] text-[#f6465d] font-bold cursor-pointer md:cursor-grab hover:bg-[#f6465d]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'stopLoss')} onClick={() => handleAddNodeMobile('stopLoss')} draggable>Stop Loss (Risk)</div>
+                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#202532] pb-1">3. Risk Management</span>
+                <div className="p-3 bg-[#080a0f] border border-[#2ebd85]/50 rounded text-[11px] text-[#2ebd85] font-bold cursor-pointer md:cursor-grab hover:bg-[#2ebd85]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'takeProfit')} onClick={() => handleAddNodeMobile('takeProfit')} draggable>Take Profit (Target)</div>
+                <div className="p-3 bg-[#080a0f] border border-[#f6465d]/50 rounded text-[11px] text-[#f6465d] font-bold cursor-pointer md:cursor-grab hover:bg-[#f6465d]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'stopLoss')} onClick={() => handleAddNodeMobile('stopLoss')} draggable>Stop Loss (Risk)</div>
             </div>
 
             <div className="space-y-3">
-                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#2b3139] pb-1">4. Execution</span>
-                <div className="p-3 bg-[#0b0e11] border border-[#eaecef]/20 rounded text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#eaecef]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'action')} onClick={() => handleAddNodeMobile('action')} draggable>Action Routing</div>
+                <span className="text-[10px] font-bold text-[#848e9c] uppercase tracking-wider block border-b border-[#202532] pb-1">4. Execution</span>
+                <div className="p-3 bg-[#080a0f] border border-[#eaecef]/20 rounded text-[11px] text-[#eaecef] font-bold cursor-pointer md:cursor-grab hover:bg-[#eaecef]/10 transition-colors shadow-sm uppercase tracking-wider" onDragStart={(event) => onDragStart(event, 'action')} onClick={() => handleAddNodeMobile('action')} draggable>Action Routing</div>
             </div>
         </div>
 
-        <div className="hidden md:flex p-5 border-t border-[#2b3139] space-x-3 bg-[#0b0e11]/50 shrink-0">
-             <button onClick={closeBuilder} className="flex-1 bg-[#2b3139] text-[#eaecef] text-xs font-bold py-2.5 rounded hover:bg-[#3b4149] transition-colors uppercase tracking-wider">Close</button>
-             <button onClick={handleSaveAndCompile} className="flex-1 bg-[#fcd535] text-[#181a20] text-xs font-bold py-2.5 rounded hover:bg-[#e5c02a] transition-colors shadow-sm uppercase tracking-wider">{editingBot ? 'Update' : 'Save Bot'}</button>
+        <div className="hidden md:flex p-5 border-t border-[#202532] space-x-3 bg-[#080a0f]/50 shrink-0">
+             <button onClick={closeBuilder} className="flex-1 bg-[#202532] text-[#eaecef] text-xs font-bold py-2.5 rounded-lg hover:bg-[#2b3545] transition-all duration-200 uppercase tracking-wider">Close</button>
+             <button onClick={handleSaveAndCompile} className="flex-1 bg-[#fcd535] text-[#181a20] text-xs font-bold py-2.5 rounded-lg hover:bg-[#e5c02a] transition-all duration-200 shadow-[0_0_15px_rgba(252,213,53,0.15)] hover:shadow-[0_0_25px_rgba(252,213,53,0.25)] uppercase tracking-wider">{editingBot ? 'Update' : 'Save Bot'}</button>
         </div>
       </div>
 
@@ -453,8 +443,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         >
           <Background color="#1f2329" gap={20} size={2} />
           {/* Offset controls upward on mobile to clear the bottom nav bar */}
-          <Controls style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', overflow: 'hidden', position: 'absolute', bottom: window.innerWidth < 768 ? '70px' : '20px', left: '20px' }} />
-          <MiniMap nodeColor={() => '#848e9c'} maskColor="#0b0e11" style={{ backgroundColor: '#181a20', border: '1px solid #2b3139', borderRadius: '4px', display: window.innerWidth < 768 ? 'none' : 'block' }} />
+          <Controls style={{ display: 'flex', flexDirection: 'column', backgroundColor: '#12151c', border: '1px solid #202532', borderRadius: '8px', overflow: 'hidden', position: 'absolute', bottom: window.innerWidth < 768 ? '70px' : '20px', left: '20px', boxShadow: '0 4px 24px rgba(0,0,0,0.3)' }} />
+          <MiniMap nodeColor={() => '#848e9c'} maskColor="#080a0f" style={{ backgroundColor: '#12151c', border: '1px solid #202532', borderRadius: '8px', display: window.innerWidth < 768 ? 'none' : 'block', boxShadow: '0 4px 24px rgba(0,0,0,0.3)' }} />
         </ReactFlow>
       </div>
     </div>
