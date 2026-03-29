@@ -2,6 +2,8 @@
 .env
 .env.*
 *.pem
+*.key
+.cert/
 
 # --- DATABASE ---
 *.sqlite
@@ -30,6 +32,3 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
-
-*.pem
-*.key

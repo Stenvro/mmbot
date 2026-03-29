@@ -6,7 +6,9 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 
-API_KEY = os.getenv("MASTER_API_KEY", "onveilig")
+API_KEY = os.getenv("MASTER_API_KEY")
+if not API_KEY:
+    raise ValueError("FATAL ERROR: MASTER_API_KEY is missing in your .env file!")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
