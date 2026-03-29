@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,6 +13,8 @@ import ccxt
 from backend.core.database import get_db, SessionLocal
 from backend.models.candles import Candle
 from backend.core.security import verify_api_key
+
+logger = logging.getLogger("apexalgo.data")
 
 router = APIRouter(
     prefix="/api/data",
@@ -37,7 +40,7 @@ async def fetch_historical_data(
         result = await asyncio.to_thread(_fetch_and_save_data, formatted_symbol, req)
         return result
     except Exception as e:
-        print(f"❌ Error in manual sync: {e}")
+        logger.error("Error in manual sync: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 def _fetch_and_save_data(formatted_symbol: str, req: HistoricalDataFetch):
@@ -51,13 +54,13 @@ def _fetch_and_save_data(formatted_symbol: str, req: HistoricalDataFetch):
         # Paginate forwards from start_ts using the 'since' parameter
         current_since = start_ts
 
-        print(f"📥 Manual Sync: {formatted_symbol} ({req.timeframe}) - Fetching forwards...")
+        logger.info("Manual Sync: %s (%s) - Fetching forwards...", formatted_symbol, req.timeframe)
 
         while current_since < end_ts:
             try:
                 ohlcv = exchange.fetch_ohlcv(formatted_symbol, req.timeframe, limit=100, since=current_since)
             except Exception as e:
-                print(f"⚠️ OKX fetch failed or limit reached: {e}")
+                logger.warning("OKX fetch failed or limit reached: %s", e)
                 break
             
             if not ohlcv or len(ohlcv) == 0: 

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
@@ -10,10 +11,14 @@ from backend.core.database import get_db
 from backend.models.positions import Position
 from backend.models.orders import Order
 from backend.models.candles import Candle
+from backend.core.security import verify_api_key
+
+logger = logging.getLogger("apexalgo.trades")
 
 router = APIRouter(
     prefix="/api/trades",
-    tags=["Trades"]
+    tags=["Trades"],
+    dependencies=[Depends(verify_api_key)]
 )
 
 @router.get("/positions")
@@ -39,14 +44,14 @@ def get_orders(symbol: str = None, mode: str = None, db: Session = Depends(get_d
 def delete_bot_trades(bot_name: str, mode: Optional[str] = None, db: Session = Depends(get_db)):
     order_query = db.query(Order).filter(Order.bot_name == bot_name)
     pos_query = db.query(Position).filter(Position.bot_name == bot_name)
-    
+
     if mode:
         order_query = order_query.filter(Order.mode == mode)
         pos_query = pos_query.filter(Position.mode == mode)
-        
+
     orders_deleted = order_query.delete(synchronize_session=False)
     pos_deleted = pos_query.delete(synchronize_session=False)
-    
+
     db.commit()
     return {"message": f"Deleted {orders_deleted} orders and {pos_deleted} positions for '{bot_name}' in mode: {mode or 'ALL'}."}
 
@@ -55,15 +60,16 @@ def delete_historical_position(position_id: int, db: Session = Depends(get_db)):
     pos = db.query(Position).filter(Position.id == position_id).first()
     if not pos:
         raise HTTPException(status_code=404, detail="Position not found")
-    
+
     try:
-        db.delete(pos)
         db.query(Order).filter(Order.position_id == position_id).delete()
+        db.delete(pos)
         db.commit()
         return {"status": "success", "message": "Trade permanently deleted."}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Failed to delete position %d: %s", position_id, e)
+        raise HTTPException(status_code=500, detail="Failed to delete trade.")
 
 @router.post("/positions/{position_id}/close")
 def force_close_position(position_id: int, db: Session = Depends(get_db)):
@@ -73,7 +79,19 @@ def force_close_position(position_id: int, db: Session = Depends(get_db)):
     if pos.status == "closed":
         return JSONResponse(status_code=400, content={"detail": "Position is already closed."})
 
+    # Atomically mark as closed to prevent double-close race
+    rows_updated = db.query(Position).filter(
+        Position.id == position_id,
+        Position.status == "open"
+    ).update({"status": "closing"}, synchronize_session="fetch")
+
+    if rows_updated == 0:
+        return JSONResponse(status_code=400, content={"detail": "Position is already being closed."})
+
     try:
+        # Refresh to get the updated state
+        db.refresh(pos)
+
         # Use the most recent candle close price to calculate realised PnL
         latest_candle = db.query(Candle).filter(Candle.symbol == pos.symbol).order_by(Candle.timestamp.desc()).first()
         close_price = latest_candle.close if latest_candle else pos.entry_price
@@ -104,7 +122,8 @@ def force_close_position(position_id: int, db: Session = Depends(get_db)):
         return {"status": "success", "message": f"Position forcefully closed at ${close_price:.2f}"}
     except Exception as e:
         db.rollback()
-        return JSONResponse(status_code=500, content={"detail": str(e)})
+        logger.error("Failed to force close position %d: %s", position_id, e)
+        return JSONResponse(status_code=500, content={"detail": "Failed to close position."})
 
 @router.get("/export")
 def export_trades_csv(mode: str = "live", db: Session = Depends(get_db)):

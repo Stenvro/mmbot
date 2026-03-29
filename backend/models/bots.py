@@ -11,6 +11,6 @@ class BotConfig(Base):
     is_sandbox = Column(Boolean, default=True)
     strategy = Column(String)
     
-    settings = Column(JSON, default={})                 
+    settings = Column(JSON, default=dict)
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

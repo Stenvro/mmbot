@@ -1,5 +1,9 @@
+import logging
 import pandas as pd
 import pandas_ta_classic as ta
+import numpy as np
+
+logger = logging.getLogger("apexalgo.evaluator")
 
 class NodeEvaluator:
     def __init__(self, settings: dict):
@@ -10,22 +14,22 @@ class NodeEvaluator:
     def _calculate_indicators(self):
         """Calculates all indicators on the DataFrame using pandas_ta."""
         nodes = self.settings.get("nodes", {})
-        
+
         for node_id, node in nodes.items():
             if node.get("class") == "indicator":
                 method = str(node.get("method", "rsi")).lower()
                 params = node.get("params", {})
                 out_idx = int(node.get("output_idx", 0))
-                
+
                 if method == "volume":
-                    self.df[node_id] = self.df['volume'] if 'volume' in self.df.columns else 0.0
+                    self.df[node_id] = self.df['volume'] if 'volume' in self.df.columns else np.nan
                     continue
                 elif method == "vma":
                     if 'volume' in self.df.columns:
                         length = params.get('length', 14) if isinstance(params, dict) else 14
                         self.df[node_id] = ta.sma(self.df['volume'], length=length)
                     else:
-                        self.df[node_id] = 0.0
+                        self.df[node_id] = np.nan
                     continue
 
                 if hasattr(self.df.ta, method):
@@ -39,13 +43,13 @@ class NodeEvaluator:
                             res = getattr(self.df.ta, method)(params)
                         else:
                             res = getattr(self.df.ta, method)()
-                            
+
                     except Exception as e:
-                        print(f"Warning: invalid params for '{method}' ({params}), retrying with defaults. ({e})")
+                        logger.warning("Invalid params for '%s' (%s), retrying with defaults. (%s)", method, params, e)
                         try:
                             res = getattr(self.df.ta, method)()
                         except Exception as e2:
-                            print(f"Error: could not compute indicator '{method}': {e2}")
+                            logger.error("Could not compute indicator '%s': %s", method, e2)
                             continue
 
                     if res is None:
@@ -67,14 +71,14 @@ class NodeEvaluator:
                 c = pd.to_numeric(self.df['close'], errors='coerce')
                 self.df['atr'] = ta.atr(h, l, c, length=14)
             else:
-                self.df['atr'] = 0.0
+                self.df['atr'] = np.nan
         except Exception:
-            self.df['atr'] = 0.0
+            self.df['atr'] = np.nan
 
     def resolve_node(self, node_id: str) -> pd.Series:
         if not node_id:
             return pd.Series(False, index=self.df.index)
-            
+
         nodes = self.settings.get("nodes", {})
         node = nodes.get(node_id)
         if not node:
@@ -85,14 +89,14 @@ class NodeEvaluator:
         if node_class == "indicator":
             if node_id in self.df.columns:
                 return self.df[node_id]
-            return pd.Series(0.0, index=self.df.index)
+            return pd.Series(np.nan, index=self.df.index)
 
         elif node_class == "price_data":
             price_type = node.get("type", "close").lower()
             offset = int(node.get("offset", 0))
             if price_type in self.df.columns:
-                return self.df[price_type].shift(offset).fillna(0.0)
-            return pd.Series(0.0, index=self.df.index)
+                return self.df[price_type].shift(offset)
+            return pd.Series(np.nan, index=self.df.index)
 
         elif node_class == "condition":
             left_s = self.resolve_operand(node.get("left"))
@@ -122,9 +126,10 @@ class NodeEvaluator:
             left_resolved = self.resolve_node(node.get("left"))
             right_resolved = self.resolve_node(node.get("right")) if node.get("right") else pd.Series(False, index=self.df.index)
 
-            left_s = left_resolved.astype(bool) if isinstance(left_resolved, pd.Series) else pd.Series(bool(left_resolved), index=self.df.index)
-            right_s = right_resolved.astype(bool) if isinstance(right_resolved, pd.Series) else pd.Series(bool(right_resolved), index=self.df.index)
-            
+            # Fill NaN with False before boolean conversion to avoid propagating NaN as True
+            left_s = left_resolved.fillna(False).astype(bool) if isinstance(left_resolved, pd.Series) else pd.Series(bool(left_resolved), index=self.df.index)
+            right_s = right_resolved.fillna(False).astype(bool) if isinstance(right_resolved, pd.Series) else pd.Series(bool(right_resolved), index=self.df.index)
+
             op = node.get("operator", "and").lower()
 
             if op == "and": return left_s & right_s
@@ -135,7 +140,7 @@ class NodeEvaluator:
             if op == "not": return ~left_s
             return pd.Series(False, index=self.df.index)
 
-        return pd.Series(0.0, index=self.df.index)
+        return pd.Series(np.nan, index=self.df.index)
 
     def resolve_operand(self, operand) -> pd.Series:
         if isinstance(operand, (int, float)):
@@ -147,4 +152,4 @@ class NodeEvaluator:
         try:
             return pd.Series(float(operand), index=self.df.index)
         except (ValueError, TypeError):
-            return pd.Series(0.0, index=self.df.index)
+            return pd.Series(np.nan, index=self.df.index)

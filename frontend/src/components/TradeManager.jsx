@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../api/client';
 
 const safeNum = (val, decimals = 2) => {
@@ -69,10 +69,14 @@ export default function TradeManager({ setError }) {
 
   useEffect(() => {
     fetchAllData();
-    // Live price update every 10 seconds for open positions
+  }, []);
+
+  // Separate effect for price polling that tracks positions changes
+  useEffect(() => {
+    if (positions.length === 0) return;
     const priceInterval = setInterval(() => fetchLivePrices(positions), 10000);
     return () => clearInterval(priceInterval);
-  }, []);
+  }, [positions]);
 
   // Reset page when filters change
   useEffect(() => {

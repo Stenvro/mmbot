@@ -146,14 +146,15 @@ export default function Settings({ setError }) {
   const executeSwap = async (e) => {
       e.preventDefault();
       setLoading(true);
+      const currentWallet = swapModal; // Capture before clearing state
       try {
-          await apiClient.post(`/api/keys/${swapModal}/swap`, {
+          await apiClient.post(`/api/keys/${currentWallet}/swap`, {
               from_asset: swapFrom,
               to_asset: swapTo,
               amount: parseFloat(swapAmount),
               amount_type: amountType
           });
-          
+
           setSwapModal(null);
           setModalConfig({
             type: 'success',
@@ -164,11 +165,11 @@ export default function Settings({ setError }) {
 
           setTimeout(async () => {
               try {
-                  const response = await apiClient.get(`/api/keys/${swapModal}/balance`);
-                  setBalances(prev => ({ ...prev, [swapModal]: response.data.balances }));
+                  const response = await apiClient.get(`/api/keys/${currentWallet}/balance`);
+                  setBalances(prev => ({ ...prev, [currentWallet]: response.data.balances }));
               } catch (balanceErr) {}
           }, 1500);
-          
+
       } catch (err) {
           setSwapModal(null);
           setModalConfig({ type: 'error', title: 'Swap Failed', message: err.response?.data?.detail || err.message, onConfirm: () => setModalConfig(null) });

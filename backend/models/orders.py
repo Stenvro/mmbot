@@ -8,7 +8,7 @@ class Order(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     
-    position_id = Column(Integer, ForeignKey("positions.id"), nullable=True) 
+    position_id = Column(Integer, ForeignKey("positions.id"), nullable=True, index=True)
     bot_name = Column(String, index=True)               # Toegevoegd voor makkelijk filteren
     
     # CRUCIAAL VOOR BELASTING/BOEKHOUDING: 'live', 'paper', of 'backtest'

@@ -247,80 +247,88 @@ export default function ChartEngine({ dataset }) {
     } catch (err) { /* silent */ } 
   }; 
 
-  useEffect(() => { 
-    fetchMarketInfo(); 
-    initBotConfigs();  
-    pollData();     
+  useEffect(() => {
+    const abortController = new AbortController();
+    const signal = abortController.signal;
 
-    const infoInterval = setInterval(fetchMarketInfo, 60000);  
+    fetchMarketInfo();
+    initBotConfigs();
+    pollData();
 
-    const initChart = async () => { 
-      try { 
-        setLoading(true); 
-        setErrorMsg(null); 
-        const chart = createChart(chartContainerRef.current, { 
+    const infoInterval = setInterval(fetchMarketInfo, 60000);
+
+    const initChart = async () => {
+      try {
+        setLoading(true);
+        setErrorMsg(null);
+        const chart = createChart(chartContainerRef.current, {
           // --- APEXALGO DARK THEME ---
-          layout: { background: { type: 'solid', color: '#080a0f' }, textColor: '#7d8598' }, 
-          grid: { vertLines: { color: '#202532' }, horzLines: { color: '#202532' } }, 
-          crosshair: { mode: 0 },  
-          
-          rightPriceScale: { borderColor: '#202532', autoScale: true, scaleMargins: { top: 0.1, bottom: 0.25 } }, 
-          
-          leftPriceScale: { visible: true, borderColor: '#202532', autoScale: true, scaleMargins: { top: 0.8, bottom: 0 } },  
-          
-          timeScale: { borderColor: '#202532', timeVisible: true },  
-          autoSize: true,  
-        }); 
-        chartRef.current = chart; 
+          layout: { background: { type: 'solid', color: '#080a0f' }, textColor: '#7d8598' },
+          grid: { vertLines: { color: '#202532' }, horzLines: { color: '#202532' } },
+          crosshair: { mode: 0 },
 
-        candleSeriesRef.current = chart.addSeries(CandlestickSeries, { 
-          upColor: '#2ebd85', downColor: '#f6465d', borderVisible: false, wickUpColor: '#2ebd85', wickDownColor: '#f6465d' 
-        }); 
-         
-        markersPluginRef.current = createSeriesMarkers(candleSeriesRef.current, []); 
+          rightPriceScale: { borderColor: '#202532', autoScale: true, scaleMargins: { top: 0.1, bottom: 0.25 } },
 
-        volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' }); 
-        volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } }); 
+          leftPriceScale: { visible: true, borderColor: '#202532', autoScale: true, scaleMargins: { top: 0.8, bottom: 0 } },
 
-        const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {  
-            headers: { 'x-timeframe': dataset.timeframe }, 
-            params: { limit: 100000 } 
-        }); 
+          timeScale: { borderColor: '#202532', timeVisible: true },
+          autoSize: true,
+        });
+        chartRef.current = chart;
 
-        if (!response.data || response.data.length === 0) { 
-           setErrorMsg("No data found in local database. Download historical data first."); 
-           setLoading(false); return; 
-        } 
+        candleSeriesRef.current = chart.addSeries(CandlestickSeries, {
+          upColor: '#2ebd85', downColor: '#f6465d', borderVisible: false, wickUpColor: '#2ebd85', wickDownColor: '#f6465d'
+        });
 
-        applyInitialDataToChart(response.data); 
-        chart.timeScale().fitContent();  
+        markersPluginRef.current = createSeriesMarkers(candleSeriesRef.current, []);
 
-        chart.subscribeCrosshairMove((param) => { 
-          if (!param.point || !param.time || param.point.x < 0 || param.point.y < 0) { 
-            isCrosshairActive.current = false; 
-            if (lastCandleRef.current) setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time }); 
-            return; 
-          } 
-          isCrosshairActive.current = true; 
-          const dCandle = param.seriesData.get(candleSeriesRef.current); 
-          const dVol = param.seriesData.get(volumeSeriesRef.current); 
-          if (dCandle) setHoverData({ ...dCandle, value: dVol ? dVol.value : 0, time: param.time }); 
-        }); 
-      } catch (error) { 
-        setErrorMsg(`API Error: ${error.message}`); 
-      } finally { setLoading(false); } 
-    }; 
+        volumeSeriesRef.current = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
+        volumeSeriesRef.current.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-    initChart(); 
-    const pollInterval = setInterval(updateLatestCandles, 1000); 
-    const signalInterval = setInterval(pollData, 5000);  
-     
-    return () => {  
-      clearInterval(infoInterval); 
-      clearInterval(pollInterval); 
-      clearInterval(signalInterval); 
-      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; } 
-    }; 
+        const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
+            headers: { 'x-timeframe': dataset.timeframe },
+            params: { limit: 100000 },
+            signal
+        });
+
+        if (signal.aborted) return;
+
+        if (!response.data || response.data.length === 0) {
+           setErrorMsg("No data found in local database. Download historical data first.");
+           setLoading(false); return;
+        }
+
+        applyInitialDataToChart(response.data);
+        chart.timeScale().fitContent();
+
+        chart.subscribeCrosshairMove((param) => {
+          if (!param.point || !param.time || param.point.x < 0 || param.point.y < 0) {
+            isCrosshairActive.current = false;
+            if (lastCandleRef.current) setHoverData({ ...lastCandleRef.current, time: lastCandleRef.current.time });
+            return;
+          }
+          isCrosshairActive.current = true;
+          const dCandle = param.seriesData.get(candleSeriesRef.current);
+          const dVol = param.seriesData.get(volumeSeriesRef.current);
+          if (dCandle) setHoverData({ ...dCandle, value: dVol ? dVol.value : 0, time: param.time });
+        });
+      } catch (error) {
+        if (signal.aborted) return;
+        setErrorMsg(`API Error: ${error.message}`);
+      } finally { if (!signal.aborted) setLoading(false); }
+    };
+
+    initChart();
+    const pollInterval = setInterval(updateLatestCandles, 1000);
+    const signalInterval = setInterval(pollData, 5000);
+
+    return () => {
+      abortController.abort();
+      clearInterval(infoInterval);
+      clearInterval(pollInterval);
+      clearInterval(signalInterval);
+      if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
+    };
   }, [dataset.symbol, dataset.timeframe]); 
 
   useEffect(() => { 
