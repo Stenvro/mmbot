@@ -31,6 +31,27 @@ class NodeEvaluator:
                     else:
                         self.df[node_id] = np.nan
                     continue
+                elif method == "ichimoku":
+                    try:
+                        p = params if isinstance(params, dict) else {}
+                        result = self.df.ta.ichimoku(
+                            tenkan=p.get('tenkan', 9),
+                            kijun=p.get('kijun', 26),
+                            senkou=p.get('senkou', 52)
+                        )
+                        # ichimoku returns a tuple: (span_df, lookahead_df)
+                        ich_df = result[0] if isinstance(result, tuple) else result
+                        if isinstance(ich_df, pd.DataFrame) and not ich_df.empty:
+                            if out_idx < len(ich_df.columns):
+                                self.df[node_id] = ich_df.iloc[:, out_idx]
+                            else:
+                                self.df[node_id] = ich_df.iloc[:, 0]
+                        else:
+                            self.df[node_id] = np.nan
+                    except Exception as e:
+                        logger.warning("Could not compute ichimoku: %s", e)
+                        self.df[node_id] = np.nan
+                    continue
 
                 if hasattr(self.df.ta, method):
                     res = None
@@ -60,6 +81,7 @@ class NodeEvaluator:
                             if out_idx < len(res.columns):
                                 self.df[node_id] = res.iloc[:, out_idx]
                             else:
+                                logger.warning("Indicator '%s' output_idx %d exceeds columns (%d), using column 0", method, out_idx, len(res.columns))
                                 self.df[node_id] = res.iloc[:, 0]
                     else:
                         self.df[node_id] = res
@@ -82,6 +104,7 @@ class NodeEvaluator:
         nodes = self.settings.get("nodes", {})
         node = nodes.get(node_id)
         if not node:
+            logger.warning("resolve_node: node '%s' not found in settings", node_id)
             return pd.Series(False, index=self.df.index)
 
         node_class = node.get("class")
@@ -106,6 +129,21 @@ class NodeEvaluator:
                 return left_s > left_s.shift(1)
             elif op == "decreasing":
                 return left_s < left_s.shift(1)
+            elif op == "increasing_for":
+                # A is increasing for N consecutive bars (right = N)
+                n = int(self.resolve_operand(node.get("right")).iloc[-1]) if node.get("right") is not None else 2
+                inc = (left_s > left_s.shift(1)).astype(int)
+                streak = inc.copy()
+                for i in range(1, n):
+                    streak = streak & inc.shift(i).fillna(0).astype(bool)
+                return streak.astype(bool)
+            elif op == "decreasing_for":
+                n = int(self.resolve_operand(node.get("right")).iloc[-1]) if node.get("right") is not None else 2
+                dec = (left_s < left_s.shift(1)).astype(int)
+                streak = dec.copy()
+                for i in range(1, n):
+                    streak = streak & dec.shift(i).fillna(0).astype(bool)
+                return streak.astype(bool)
 
             right_s = self.resolve_operand(node.get("right"))
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Float, DateTime, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from backend.core.database import Base
@@ -24,5 +24,8 @@ class Position(Base):
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     closed_at = Column(DateTime, nullable=True)
+
+    highest_price = Column(Float, nullable=True)
+    triggered_exits = Column(JSON, nullable=True, default=list)
 
     orders = relationship("Order", back_populates="position", cascade="all, delete-orphan")

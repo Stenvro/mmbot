@@ -191,6 +191,7 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 max_positions_scope: configNode.data.maxPositionsScope || 'per_pair',
                 cooldown_trades: configNode.data.cooldownTrades || 0,
                 cooldown_candles: configNode.data.cooldownCandles || 0,
+                max_drawdown: configNode.data.maxDrawdown || 0,
                 api_execution: configNode.data.executionMode === 'exchange',
                 backtest_on_start: backtestNode ? backtestNode.data.runOnStart : false,
                 backtest_capital: backtestNode ? backtestNode.data.capital : 1000,

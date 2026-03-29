@@ -15,6 +15,7 @@ from backend.models.orders import Order
 from backend.models.positions import Position
 from backend.core.events import event_bus
 from backend.core.security import verify_api_key
+from backend.engine.settings_validator import validate_bot_settings
 
 logger = logging.getLogger("apexalgo.bots")
 
@@ -89,11 +90,15 @@ def get_bot_signals(symbol: str, timeframe: str, limit: int = 100000, db: Sessio
 
     return result
 
-@router.post("/", response_model=BotResponse)
+@router.post("/")
 def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
     existing_bot = db.query(BotConfig).filter(BotConfig.name == bot_in.name).first()
     if existing_bot:
         raise HTTPException(status_code=400, detail="A bot with this name already exists.")
+
+    validation = validate_bot_settings(bot_in.settings)
+    if validation["errors"]:
+        raise HTTPException(status_code=400, detail={"validation_errors": validation["errors"]})
 
     new_bot = BotConfig(
         name=bot_in.name,
@@ -105,7 +110,15 @@ def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
     db.add(new_bot)
     db.commit()
     db.refresh(new_bot)
-    return new_bot
+
+    result = {
+        "id": new_bot.id, "name": new_bot.name, "is_sandbox": new_bot.is_sandbox,
+        "strategy": new_bot.strategy, "settings": new_bot.settings,
+        "is_active": new_bot.is_active, "created_at": new_bot.created_at.isoformat() if new_bot.created_at else None,
+    }
+    if validation["warnings"]:
+        result["validation_warnings"] = validation["warnings"]
+    return result
 
 @router.put("/{bot_id}")
 async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depends(get_db)):
@@ -113,14 +126,32 @@ async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depe
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
 
+    if "name" in bot_data and bot_data["name"] != bot.name:
+        new_name = bot_data["name"]
+        existing = db.query(BotConfig).filter(BotConfig.name == new_name, BotConfig.id != bot_id).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="A bot with this name already exists.")
+        old_name = bot.name
+        bot.name = new_name
+        db.query(Signal).filter(Signal.bot_name == old_name).update({"bot_name": new_name}, synchronize_session=False)
+        db.query(Order).filter(Order.bot_name == old_name).update({"bot_name": new_name}, synchronize_session=False)
+        db.query(Position).filter(Position.bot_name == old_name).update({"bot_name": new_name}, synchronize_session=False)
+
     if "is_sandbox" in bot_data:
         bot.is_sandbox = bot_data["is_sandbox"]
 
+    validation_warnings = []
     if "settings" in bot_data:
         # Re-read settings inside a begin to reduce race window
         current_settings = dict(bot.settings or {})
         for key, value in bot_data["settings"].items():
             current_settings[key] = value
+
+        validation = validate_bot_settings(current_settings)
+        if validation["errors"]:
+            raise HTTPException(status_code=400, detail={"validation_errors": validation["errors"]})
+        validation_warnings = validation["warnings"]
+
         bot.settings = current_settings
         flag_modified(bot, "settings")
 
@@ -129,7 +160,10 @@ async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depe
         asyncio.create_task(flush_bot_data(bot_name))
 
     db.commit()
-    return {"message": "Bot configuration updated successfully"}
+    result = {"message": "Bot configuration updated successfully"}
+    if validation_warnings:
+        result["validation_warnings"] = validation_warnings
+    return result
 
 async def flush_bot_data(bot_name: str):
     def _flush():

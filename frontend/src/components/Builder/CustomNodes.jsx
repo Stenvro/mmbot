@@ -3,49 +3,91 @@ import { Handle, Position } from 'reactflow';
 
 // ==========================================
 // 1. INDICATOR DEFINITIONS
+// scale: "overlay" = on price chart, "oscillator" = separate pane (0-100 or centered), "volume" = volume pane
 // ==========================================
 const INDICATOR_GROUPS = {
     "Trend & Overlap": {
-        sma: { name: "SMA (Simple Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        ema: { name: "EMA (Exponential Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        wma: { name: "WMA (Weighted Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        macd: { name: "MACD", lines: ["MACD Line", "Histogram", "Signal Line"], params: [
+        sma: { name: "SMA (Simple Moving Avg)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        ema: { name: "EMA (Exponential Moving Avg)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        wma: { name: "WMA (Weighted Moving Avg)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        dema: { name: "DEMA (Double EMA)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        tema: { name: "TEMA (Triple EMA)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        kama: { name: "KAMA (Kaufman Adaptive MA)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 10}, {id: "fast", label: "Fast SC", default: 2}, {id: "slow", label: "Slow SC", default: 30}] },
+        linreg: { name: "Linear Regression", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        midpoint: { name: "Midpoint (HL/2)", scale: "overlay", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        supertrend: { name: "Supertrend", scale: "overlay", lines: ["Trend", "Direction", "Long", "Short"], params: [{id: "length", label: "ATR Length", default: 10}, {id: "multiplier", label: "Multiplier", default: 3.0}] },
+        macd: { name: "MACD", scale: "oscillator", lines: ["MACD Line", "Histogram", "Signal Line"], params: [
             {id: "fast", label: "Fast Length", default: 12},
             {id: "slow", label: "Slow Length", default: 26},
             {id: "signal", label: "Signal Length", default: 9}
         ]},
-        adx: { name: "ADX (Average Directional Index)", lines: ["ADX", "DMP (+DI)", "DMN (-DI)"], params: [{id: "length", label: "Length", default: 14}] },
-        psar: { name: "Parabolic SAR", lines: ["Long", "Short", "AF", "Reversal"], params: [{id: "af0", label: "AF Step", default: 0.02}, {id: "af", label: "AF Max", default: 0.2}] },
+        adx: { name: "ADX (Average Directional Index)", scale: "oscillator", lines: ["ADX", "DMP (+DI)", "DMN (-DI)"], params: [{id: "length", label: "Length", default: 14}] },
+        psar: { name: "Parabolic SAR", scale: "overlay", lines: ["Long", "Short", "AF", "Reversal"], params: [{id: "af0", label: "AF Step", default: 0.02}, {id: "af", label: "AF Max", default: 0.2}] },
+        ichimoku: { name: "Ichimoku Cloud", scale: "overlay", lines: ["Conversion (Tenkan)", "Base (Kijun)", "Span A", "Span B", "Chikou"], params: [{id: "tenkan", label: "Tenkan", default: 9}, {id: "kijun", label: "Kijun", default: 26}, {id: "senkou", label: "Senkou", default: 52}] },
     },
     "Momentum": {
-        rsi: { name: "RSI (Relative Strength Index)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        stoch: { name: "Stochastic Oscillator", lines: ["%K", "%D"], params: [
+        rsi: { name: "RSI (Relative Strength Index)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        stoch: { name: "Stochastic Oscillator", scale: "oscillator", lines: ["%K", "%D"], params: [
             {id: "k", label: "%K Length", default: 14},
             {id: "d", label: "%D Length", default: 3},
             {id: "smooth_k", label: "Smooth %K", default: 3}
         ]},
-        cci: { name: "CCI (Commodity Channel Index)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        mfi: { name: "MFI (Money Flow Index)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        roc: { name: "ROC (Rate of Change)", lines: ["Main"], params: [{id: "length", label: "Length", default: 10}] },
-        ao: { name: "Awesome Oscillator", lines: ["Main"], params: [{id: "fast", label: "Fast", default: 5}, {id: "slow", label: "Slow", default: 34}] },
+        stochrsi: { name: "Stochastic RSI", scale: "oscillator", lines: ["%K", "%D"], params: [
+            {id: "length", label: "RSI Length", default: 14},
+            {id: "rsi_length", label: "Stoch Length", default: 14},
+            {id: "k", label: "%K", default: 3},
+            {id: "d", label: "%D", default: 3}
+        ]},
+        cci: { name: "CCI (Commodity Channel Index)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        mfi: { name: "MFI (Money Flow Index)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        willr: { name: "Williams %R", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        roc: { name: "ROC (Rate of Change)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 10}] },
+        mom: { name: "Momentum", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 10}] },
+        tsi: { name: "TSI (True Strength Index)", scale: "oscillator", lines: ["TSI", "Signal"], params: [{id: "fast", label: "Fast", default: 13}, {id: "slow", label: "Slow", default: 25}, {id: "signal", label: "Signal", default: 13}] },
+        uo: { name: "Ultimate Oscillator", scale: "oscillator", lines: ["Main"], params: [{id: "fast", label: "Fast", default: 7}, {id: "medium", label: "Medium", default: 14}, {id: "slow", label: "Slow", default: 28}] },
+        ao: { name: "Awesome Oscillator", scale: "oscillator", lines: ["Main"], params: [{id: "fast", label: "Fast", default: 5}, {id: "slow", label: "Slow", default: 34}] },
+        ppo: { name: "PPO (Percentage Price Osc)", scale: "oscillator", lines: ["PPO", "Histogram", "Signal"], params: [{id: "fast", label: "Fast", default: 12}, {id: "slow", label: "Slow", default: 26}, {id: "signal", label: "Signal", default: 9}] },
+        fisher: { name: "Fisher Transform", scale: "oscillator", lines: ["Fisher", "Signal"], params: [{id: "length", label: "Length", default: 9}] },
+        cmo: { name: "CMO (Chande Momentum)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
     },
     "Volatility": {
-        bbands: { name: "Bollinger Bands", lines: ["Lower Band", "Mid Band", "Upper Band", "Bandwidth", "Percent"], params: [
+        bbands: { name: "Bollinger Bands", scale: "overlay", lines: ["Lower Band", "Mid Band", "Upper Band", "Bandwidth", "Percent"], params: [
             {id: "length", label: "Length", default: 20},
             {id: "std", label: "Std Dev", default: 2.0}
         ]},
-        atr: { name: "ATR (Average True Range)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        kc: { name: "Keltner Channels", lines: ["Lower", "Mid", "Upper"], params: [
+        atr: { name: "ATR (Average True Range)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        natr: { name: "NATR (Normalized ATR %)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        kc: { name: "Keltner Channels", scale: "overlay", lines: ["Lower", "Mid", "Upper"], params: [
             {id: "length", label: "Length", default: 20},
             {id: "scalar", label: "Multiplier", default: 2.0}
         ]},
+        donchian: { name: "Donchian Channels", scale: "overlay", lines: ["Lower", "Mid", "Upper"], params: [
+            {id: "lower_length", label: "Lower Length", default: 20},
+            {id: "upper_length", label: "Upper Length", default: 20}
+        ]},
+        accbands: { name: "Acceleration Bands", scale: "overlay", lines: ["Lower", "Mid", "Upper"], params: [{id: "length", label: "Length", default: 20}] },
+        massi: { name: "Mass Index", scale: "oscillator", lines: ["Main"], params: [{id: "fast", label: "Fast", default: 9}, {id: "slow", label: "Slow", default: 25}] },
     },
     "Volume": {
-        volume: { name: "Raw Volume", lines: ["Main"], params: [] },
-        vma: { name: "VMA (Volume Moving Avg)", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
-        obv: { name: "On-Balance Volume (OBV)", lines: ["Main"], params: [] },
-        vwap: { name: "VWAP", lines: ["Main"], params: [] },
-        cmf: { name: "Chaikin Money Flow", lines: ["Main"], params: [{id: "length", label: "Length", default: 20}] },
+        volume: { name: "Raw Volume", scale: "volume", lines: ["Main"], params: [] },
+        vma: { name: "VMA (Volume Moving Avg)", scale: "volume", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        obv: { name: "On-Balance Volume (OBV)", scale: "volume", lines: ["Main"], params: [] },
+        vwap: { name: "VWAP", scale: "overlay", lines: ["Main"], params: [] },
+        cmf: { name: "Chaikin Money Flow", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 20}] },
+        ad: { name: "Accumulation/Distribution", scale: "volume", lines: ["Main"], params: [] },
+        adosc: { name: "AD Oscillator (Chaikin)", scale: "oscillator", lines: ["Main"], params: [{id: "fast", label: "Fast", default: 3}, {id: "slow", label: "Slow", default: 10}] },
+        eom: { name: "Ease of Movement", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        pvt: { name: "Price Volume Trend", scale: "volume", lines: ["Main"], params: [] },
+    },
+    "Statistics": {
+        variance: { name: "Variance", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        stdev: { name: "Standard Deviation", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        zscore: { name: "Z-Score", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 30}] },
+        slope: { name: "Slope (Linear Reg)", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 14}] },
+        entropy: { name: "Entropy", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 10}] },
+        kurtosis: { name: "Kurtosis", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 30}] },
+        skew: { name: "Skewness", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 30}] },
+        log_return: { name: "Log Return", scale: "oscillator", lines: ["Main"], params: [{id: "length", label: "Length", default: 1}] },
     }
 };
 
@@ -106,6 +148,11 @@ export const BotConfigNode = ({ id, data }) => (
             <span className="text-[9px] text-[#848e9c] font-bold uppercase">PER</span>
             <input type="number" placeholder="Candles" title="Amount of Candles" className="w-1/2 bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.cooldownCandles !== undefined ? data.cooldownCandles : 0} onChange={(e) => data.onChange(id, 'cooldownCandles', e.target.value === "" ? "" : parseInt(e.target.value))} />
         </div>
+      </div>
+      <div className="pt-2 border-t border-[#2b3139]">
+        <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Max Drawdown % (0 = Off)</label>
+        <input type="number" step="0.1" className="w-full bg-[#181a20] border border-[#2b3139] text-[#fcd535] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none font-mono text-center" value={data.maxDrawdown !== undefined ? data.maxDrawdown : 0} onChange={(e) => data.onChange(id, 'maxDrawdown', e.target.value === "" ? "" : parseFloat(e.target.value))} />
+        <span className="text-[9px] text-[#848e9c] block mt-1">Auto-stops bot if cumulative drawdown exceeds this %</span>
       </div>
       <div className="pt-2 border-t border-[#2b3139]">
         <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Live Execution Mode</label>
@@ -297,12 +344,15 @@ export const ConditionNode = ({ id, data }) => (
           <option value=">">IS GREATER THAN (&gt;)</option>
           <option value="<">IS LESS THAN (&lt;)</option>
           <option value="==">IS EQUAL TO (==)</option>
+          <option value="!=">IS NOT EQUAL (!=)</option>
           <option value=">=">GREATER OR EQUAL (&gt;=)</option>
           <option value="<=">LESS OR EQUAL (&lt;=)</option>
           <option value="cross_above">CROSSES ABOVE</option>
           <option value="cross_below">CROSSES BELOW</option>
           <option value="increasing">IS INCREASING (Up)</option>
           <option value="decreasing">IS DECREASING (Down)</option>
+          <option value="increasing_for">INCREASING FOR N BARS</option>
+          <option value="decreasing_for">DECREASING FOR N BARS</option>
         </select>
       </div>
       <div className={`flex items-center justify-between transition-opacity ${['increasing', 'decreasing'].includes(data.operator) ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>

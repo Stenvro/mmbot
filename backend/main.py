@@ -12,7 +12,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-from backend.core.database import engine, Base
+from backend.core.database import engine, Base, run_migrations
 from backend.core.security import verify_api_key
 
 # Ensure SQLAlchemy knows about all models before calling create_all()
@@ -30,8 +30,9 @@ from backend.routers import keys, data, bots, trades
 from backend.engine.websocket_streamer import okx_streamer  
 from backend.engine.bot_manager import bot_manager
 
-# Create database tables
+# Create database tables and run migrations for existing DBs
 Base.metadata.create_all(bind=engine)
+run_migrations()
 
 # Lifespan context manager for background tasks
 @asynccontextmanager

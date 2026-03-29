@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react'; 
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts'; 
-import { apiClient } from '../api/client'; 
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
+import { apiClient } from '../api/client';
+import { INDICATOR_SCALE_MAP } from './Builder/indicatorConfig'; 
 
 const safeParseTime = (ts) => { 
   if (!ts) return null; 
@@ -466,14 +467,20 @@ export default function ChartEngine({ dataset }) {
             const seriesId = `${botName}_${indKey}`; 
             const isActive = config.indicators[indKey]; 
 
-            if (isActive) { 
-                if (!indicatorSeriesRef.current[seriesId]) { 
-                    const isOscillator = /RSI|MACD|MFI|CCI|STOCH|ATR|ADX/i.test(indKey); 
-                    indicatorSeriesRef.current[seriesId] = chartRef.current.addSeries(LineSeries, { 
-                        color: getColor(seriesId), lineWidth: 2, 
-                        priceScaleId: isOscillator ? 'left' : 'right', 
-                        title: `${indKey}`, lastValueVisible: true, priceLineVisible: true, 
-                    }); 
+            if (isActive) {
+                if (!indicatorSeriesRef.current[seriesId]) {
+                    // Extract base method name (e.g., "RSI" from "RSI_14") for scale lookup
+                    const baseName = indKey.split('_')[0].toUpperCase();
+                    const scale = INDICATOR_SCALE_MAP[baseName] || 'oscillator';
+                    let scaleId = 'left'; // default: oscillator pane
+                    if (scale === 'overlay') scaleId = 'right';
+                    else if (scale === 'volume') scaleId = '';
+
+                    indicatorSeriesRef.current[seriesId] = chartRef.current.addSeries(LineSeries, {
+                        color: getColor(seriesId), lineWidth: 2,
+                        priceScaleId: scaleId,
+                        title: `${indKey}`, lastValueVisible: true, priceLineVisible: true,
+                    });
                 } 
                 const series = indicatorSeriesRef.current[seriesId]; 
                 
