@@ -230,7 +230,7 @@ class BotManager:
                 elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
                 
                 initial_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
-                print(f"⏳ BotManager: Controleren op data voor {symbol} (Start met {initial_count} kaarsen)...")
+                print(f"BotManager: Waiting for sufficient candle data for {symbol} (currently {initial_count} candles)...")
                 last_count = -1
                 stagnant_checks = 0
                 
@@ -238,7 +238,7 @@ class BotManager:
                     current_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
                     
                     if current_count >= lookback_limit:
-                        print(f"✅ BotManager: Voldoende data aanwezig voor {symbol} ({current_count}/{lookback_limit}).")
+                        print(f"BotManager: Sufficient data available for {symbol} ({current_count}/{lookback_limit}).")
                         break
                         
                     if current_count == last_count:
@@ -246,7 +246,7 @@ class BotManager:
                         max_stagnant = 8 if current_count == initial_count else 2
                         
                         if stagnant_checks >= max_stagnant:
-                            print(f"⚠️ BotManager: Data-aanwas voor {symbol} gestopt bij {current_count} kaarsen. Start backtest met beschikbare data.")
+                            print(f"BotManager: Data ingestion stalled for {symbol} at {current_count} candles. Proceeding with available data.")
                             break
                     else:
                         stagnant_checks = 0 
@@ -272,8 +272,8 @@ class BotManager:
                 
                 df = pd.read_sql(query, db.bind)
                 
-                if df.empty or len(df) < 50: 
-                    print(f"❌ Te weinig data voor {symbol} (Heeft {len(df)} kaarsen, min. 50 nodig). Backtest overgeslagen.")
+                if df.empty or len(df) < 50:
+                    print(f"Skipping backfill for {symbol}: insufficient data ({len(df)} candles, minimum 50 required).")
                     continue
                 
                 df = df.sort_values('timestamp').reset_index(drop=True)
@@ -301,11 +301,9 @@ class BotManager:
                 entry_series = evaluator.resolve_node(bot.settings.get("entry_node")) if bot.settings.get("entry_node") else pd.Series(False, index=evaluator.df.index)
                 exit_series = evaluator.resolve_node(exit_node) if exit_node else pd.Series(False, index=evaluator.df.index)
 
-                # --- FIX: COOLDOWN VARIABELEN ---
                 cooldown_trades = int(bot.settings.get("cooldown_trades", 0))
                 cooldown_candles = int(bot.settings.get("cooldown_candles", 0))
                 trade_entry_indices = []
-                # --------------------------------
 
                 for index, row in evaluator.df.iterrows():
                     ts = row['timestamp']
@@ -323,13 +321,12 @@ class BotManager:
                     if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
                         max_pos = int(bot.settings.get("max_positions", 1))
                         
-                        # --- FIX: COOLDOWN CHECK (BACKTEST) ---
+                        # Cooldown check: block entry if too many trades occurred within the cooldown window
                         can_buy_cooldown = True
                         if cooldown_trades > 0 and cooldown_candles > 0:
                             recent_trades = [idx for idx in trade_entry_indices if (index - idx) < cooldown_candles]
                             if len(recent_trades) >= cooldown_trades:
                                 can_buy_cooldown = False
-                        # --------------------------------------
 
                         if is_buy and not open_bt_pos and 1 <= max_pos and can_buy_cooldown:
                             trade_entry_indices.append(index)
@@ -389,7 +386,7 @@ class BotManager:
 
                 if new_signals: db.bulk_save_objects(new_signals)
                 db.commit()
-                print(f"✅ Sync Complete: '{bot.name}' on {symbol} (Target Mode: {live_mode.upper()}) | Lookback: {lookback_limit}")
+                print(f"Backfill complete: '{bot.name}' on {symbol} | mode={live_mode.upper()} | lookback={lookback_limit}")
 
         except Exception as e:
             print(f"❌ Backfill Error: {e}")
@@ -468,7 +465,7 @@ class BotManager:
                     ccxt_symbol = symbol.replace('-', '/').upper()
                     just_opened_ids = set()
 
-                    # --- FIX: COOLDOWN CHECK (LIVE) ---
+                    # Cooldown check: block entry if too many trades occurred within the cooldown window
                     tf_seconds = 60
                     if timeframe.endswith('m'): tf_seconds = int(timeframe[:-1]) * 60
                     elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
@@ -493,7 +490,6 @@ class BotManager:
                         ).count()
                         if recent_buys >= cooldown_trades:
                             can_buy_cooldown = False
-                    # ----------------------------------
 
                     if is_buy and open_count < max_pos and can_buy_cooldown:
                         trade_amount = self._calculate_trade_amount(current_price, bot.settings)

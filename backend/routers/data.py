@@ -9,7 +9,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 import ccxt
 
-# SessionLocal toegevoegd voor de threads!
 from backend.core.database import get_db, SessionLocal
 from backend.models.candles import Candle
 from backend.core.security import verify_api_key
@@ -32,7 +31,7 @@ async def fetch_historical_data(
     symbol: str,
     req: HistoricalDataFetch
 ):
-    # --- FIX: Verpakt in to_thread zodat de FastAPI backend niet bevriest voor andere knoppen ---
+    # Run in a thread to avoid blocking the event loop during long OKX fetches
     try:
         formatted_symbol = symbol.replace('-', '/').upper()
         result = await asyncio.to_thread(_fetch_and_save_data, formatted_symbol, req)
@@ -49,8 +48,7 @@ def _fetch_and_save_data(formatted_symbol: str, req: HistoricalDataFetch):
 
         all_ohlcv = []
         
-        # --- FIX: VOORUIT PAGINEREN ---
-        # We beginnen bij start_ts (oude datum) en werken onszelf een weg naar voren!
+        # Paginate forwards from start_ts using the 'since' parameter
         current_since = start_ts
 
         print(f"📥 Manual Sync: {formatted_symbol} ({req.timeframe}) - Fetching forwards...")
@@ -73,9 +71,8 @@ def _fetch_and_save_data(formatted_symbol: str, req: HistoricalDataFetch):
 
             latest_ts = valid_ohlcv[-1][0]
             
-            # Stop zodra we het heden hebben bereikt
-            if latest_ts >= end_ts: 
-                break 
+            if latest_ts >= end_ts:
+                break
                 
             current_since = latest_ts + 1
             time.sleep(exchange.rateLimit / 1000)
@@ -84,7 +81,6 @@ def _fetch_and_save_data(formatted_symbol: str, req: HistoricalDataFetch):
             return {"message": "No data found for this period. (Or OKX history limit reached)."}
         
         all_ohlcv.sort(key=lambda x: x[0])
-        # --------------------------------
 
         min_ts = datetime.fromtimestamp(all_ohlcv[0][0] / 1000.0, tz=timezone.utc)
         max_ts = datetime.fromtimestamp(all_ohlcv[-1][0] / 1000.0, tz=timezone.utc)

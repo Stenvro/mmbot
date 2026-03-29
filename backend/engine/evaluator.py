@@ -8,7 +8,7 @@ class NodeEvaluator:
         self.entry_trigger = settings.get("entry_node")
 
     def _calculate_indicators(self):
-        """Berekent alle indicatoren in de dataframe via Pandas TA."""
+        """Calculates all indicators on the DataFrame using pandas_ta."""
         nodes = self.settings.get("nodes", {})
         
         for node_id, node in nodes.items():
@@ -41,11 +41,11 @@ class NodeEvaluator:
                             res = getattr(self.df.ta, method)()
                             
                     except Exception as e:
-                        print(f"⚠️ Param-fout voor {method} ({params}). Activating Fallback: {e}")
+                        print(f"Warning: invalid params for '{method}' ({params}), retrying with defaults. ({e})")
                         try:
                             res = getattr(self.df.ta, method)()
                         except Exception as e2:
-                            print(f"❌ Definitieve Error indicator {method}: {e2}")
+                            print(f"Error: could not compute indicator '{method}': {e2}")
                             continue
 
                     if res is None:
@@ -118,11 +118,10 @@ class NodeEvaluator:
             return pd.Series(False, index=self.df.index)
 
         elif node_class == "logic":
-            # --- FIX: Veilige Boolean omzetting voor complexe (geneste) logica! ---
+            # Cast to bool explicitly: a child node may return a numeric series instead of a boolean one
             left_resolved = self.resolve_node(node.get("left"))
             right_resolved = self.resolve_node(node.get("right")) if node.get("right") else pd.Series(False, index=self.df.index)
-            
-            # Pandas vereist .astype(bool) of .fillna(False) als een node toevallig getallen doorgeeft
+
             left_s = left_resolved.astype(bool) if isinstance(left_resolved, pd.Series) else pd.Series(bool(left_resolved), index=self.df.index)
             right_s = right_resolved.astype(bool) if isinstance(right_resolved, pd.Series) else pd.Series(bool(right_resolved), index=self.df.index)
             

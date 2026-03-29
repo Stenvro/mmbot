@@ -6,10 +6,10 @@ class BotConfig(Base):
     __tablename__ = "bots"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)      # Bijv. "Veilige BTC Bot"
-    is_active = Column(Boolean, default=False)          # Mag hij nu traden?
-    is_sandbox = Column(Boolean, default=True)          # Zit hij in sandbox?
-    strategy = Column(String)                           # Welk Python-script gebruikt hij?
+    name = Column(String, unique=True, index=True)
+    is_active = Column(Boolean, default=False)
+    is_sandbox = Column(Boolean, default=True)
+    strategy = Column(String)
     
     settings = Column(JSON, default={})                 
     

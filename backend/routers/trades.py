@@ -65,7 +65,6 @@ def delete_historical_position(position_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- NIEUW: FORCE CLOSE OPEN POSITIONS ---
 @router.post("/positions/{position_id}/close")
 def force_close_position(position_id: int, db: Session = Depends(get_db)):
     pos = db.query(Position).filter(Position.id == position_id).first()
@@ -75,7 +74,7 @@ def force_close_position(position_id: int, db: Session = Depends(get_db)):
         return JSONResponse(status_code=400, content={"detail": "Position is already closed."})
 
     try:
-        # Haal de meest recente prijs op uit de database om de PnL te berekenen
+        # Use the most recent candle close price to calculate realised PnL
         latest_candle = db.query(Candle).filter(Candle.symbol == pos.symbol).order_by(Candle.timestamp.desc()).first()
         close_price = latest_candle.close if latest_candle else pos.entry_price
 

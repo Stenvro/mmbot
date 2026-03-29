@@ -191,21 +191,21 @@ async def execute_quick_swap(name: str, request: Request, db: Session = Depends(
         if symbol_buy in exchange.markets:
             ticker = exchange.fetch_ticker(symbol_buy)
             raw_amount = (amount / ticker['last']) if payload.get('amount_type') == 'from' else amount
-            # NIEUW: Rond het getal af naar de strikte regels van OKX
+            # Round to OKX precision requirements before submitting
             trade_amount = float(exchange.amount_to_precision(symbol_buy, raw_amount))
             order = exchange.create_market_buy_order(symbol_buy, trade_amount)
-            
+
         elif symbol_sell in exchange.markets:
             ticker = exchange.fetch_ticker(symbol_sell)
             raw_amount = amount if payload.get('amount_type') == 'from' else (amount / ticker['last'])
-            # NIEUW: Rond het getal af naar de strikte regels van OKX
+            # Round to OKX precision requirements before submitting
             trade_amount = float(exchange.amount_to_precision(symbol_sell, raw_amount))
             order = exchange.create_market_sell_order(symbol_sell, trade_amount)
         else:
             return JSONResponse(status_code=400, content={"detail": f"Trading pair {from_asset}/{to_asset} not supported on this environment."})
             
-        # Controleer of OKX testnet de order heeft laten hangen wegens geen liquiditeit
-        time.sleep(1.0) 
+        # Wait briefly then re-fetch to detect orders stuck due to zero liquidity on testnet
+        time.sleep(1.0)
         fetched_order = exchange.fetch_order(order['id'], order['symbol'])
         
         if fetched_order['status'] == 'canceled':

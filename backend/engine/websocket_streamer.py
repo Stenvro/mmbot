@@ -60,7 +60,7 @@ class OKXStreamer:
                 timeframe = channel.replace("candle", "").lower()
                 tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
                 
-                print(f"📥 Historical Sync: {symbol} ({timeframe}) - Fetching up to {lookback_limit} candles BACKWARDS...")
+                print(f"Historical sync: {symbol} ({timeframe}) — fetching up to {lookback_limit} candles backwards...")
                 
                 now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
                 current_end = now_ms
@@ -69,7 +69,7 @@ class OKXStreamer:
                 bar_map = {'1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1H', '2h': '2H', '4h': '4H', '1d': '1D'}
                 bar = bar_map.get(timeframe.lower(), '15m')
                 
-                # --- FIX: ACHTERUIT DOWNLOADEN ---
+                # Paginate backwards from now using the 'after' parameter
                 while len(all_ohlcv) < lookback_limit:
                     try:
                         res = self.exchange.publicGetMarketHistoryCandles({
@@ -80,13 +80,13 @@ class OKXStreamer:
                         })
                         
                         if not res or 'data' not in res or not res['data']:
-                            print(f"⚠️ Listing datum of maximum historie bereikt voor {symbol}.")
+                            print(f"Reached listing date or maximum history limit for {symbol}.")
                             break 
                             
                         data = res['data']
                         all_ohlcv.extend(data)
                         
-                        # data[-1] is de oudste kaars in deze specifieke batch. 
+                        # data[-1] is the oldest candle in this batch; use it as the next pagination cursor
                         current_end = int(data[-1][0])
                         time.sleep(self.exchange.rateLimit / 1000)
                         
@@ -97,10 +97,10 @@ class OKXStreamer:
                 if not all_ohlcv:
                     continue
                 
-                # Sorteer van oud naar nieuw 
+                # Sort ascending by timestamp
                 all_ohlcv.sort(key=lambda x: int(x[0]))
-                
-                # --- FIX: DEDUPLICATIE ---
+
+                # Deduplicate by timestamp before inserting
                 seen_ts = set()
                 deduped = []
                 for row in all_ohlcv:
@@ -110,9 +110,8 @@ class OKXStreamer:
                         deduped.append(row)
                         
                 deduped = deduped[-lookback_limit:]
-                # -------------------------
 
-                # FIX: String naar Int conversie toegevoegd vóór de deling door 1000.0!
+                # Cast timestamp strings to int before dividing (OKX returns strings)
                 start_dt = datetime.fromtimestamp(int(deduped[0][0]) / 1000.0, tz=timezone.utc)
                 end_dt = datetime.fromtimestamp(int(deduped[-1][0]) / 1000.0, tz=timezone.utc)
                 
@@ -154,7 +153,7 @@ class OKXStreamer:
         while self.running:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                print(f"🔄 Bot state changed (ID: {event['bot_id']} -> {event['action']}). Reloading streams...")
+                print(f"Bot state changed (id={event['bot_id']}, action={event['action']}). Reconnecting streams...")
                 self.needs_reconnect = True
                 if self.ws: await self.ws.close()
             except asyncio.TimeoutError:

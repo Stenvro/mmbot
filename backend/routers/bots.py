@@ -102,7 +102,6 @@ def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
     db.refresh(new_bot) 
     return new_bot 
 
-# FIX: Maak de update async zodat hij het opschonen (wat lang kan duren) in de achtergrond doet
 @router.put("/{bot_id}") 
 async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depends(get_db)): 
     bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first() 
@@ -119,7 +118,7 @@ async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depe
         bot.settings = current_settings 
         flag_modified(bot, "settings") 
 
-        # We geven de opdracht om te schonen aan een achtergrond thread
+        # Flush stale signals and backtest data in the background
         bot_name = bot.name
         asyncio.create_task(flush_bot_data(bot_name))
 
@@ -181,7 +180,7 @@ def clear_bot_cache(bot_name: str, db: Session = Depends(get_db)):
     try: 
         deleted_signals = db.query(Signal).filter(Signal.bot_name == bot_name).delete(synchronize_session=False) 
         db.commit() 
-        return {"status": "success", "message": f"Grafiek opgeschoond! {deleted_signals} oude signalen verwijderd."} 
+        return {"status": "success", "message": f"Cache cleared. {deleted_signals} signals removed."} 
     except Exception as e: 
         db.rollback() 
         raise HTTPException(status_code=500, detail=str(e))

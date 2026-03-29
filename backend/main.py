@@ -28,13 +28,13 @@ Base.metadata.create_all(bind=engine)
 # Lifespan context manager for background tasks
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start achtergrond processen
+    # Start background services
     stream_task = asyncio.create_task(okx_streamer.start())
-    bot_task = asyncio.create_task(bot_manager.start()) 
+    bot_task = asyncio.create_task(bot_manager.start())
     yield
-    # Stop ze netjes
+    # Graceful shutdown
     okx_streamer.stop()
-    bot_manager.stop() 
+    bot_manager.stop()
     await stream_task
     await bot_task
 
@@ -47,10 +47,10 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Hiermee mag elk apparaat in je netwerk erbij
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Dit staat GET, POST, OPTIONS, etc. toe
-    allow_headers=["*"],  # Dit staat alle headers toe (zoals je API-sleutels)
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 # Connect routers to the main application
 app.include_router(keys.router)
