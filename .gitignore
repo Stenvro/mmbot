@@ -1,3 +1,6 @@
+# --- DATA (shared by Docker + manual install) ---
+data/
+
 # --- SECURITY & CONFIG ---
 .env
 .env.*
