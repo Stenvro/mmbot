@@ -60,7 +60,9 @@ export default function DataManager({ openChart, setError }) {
       setModalConfig({
         type: 'success',
         title: 'Download Complete',
-        message: `${response.data.message} (${response.data.new_saved} new candles added).`,
+        message: response.data.new_saved != null
+          ? `${response.data.message} ${response.data.new_saved} new candles added.`
+          : response.data.message,
         confirmText: 'OK',
         onConfirm: () => setModalConfig(null)
       });

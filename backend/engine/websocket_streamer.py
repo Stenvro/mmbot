@@ -4,6 +4,7 @@ import logging
 import websockets
 import time
 import ccxt
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from backend.core.database import SessionLocal
@@ -55,111 +56,121 @@ class OKXStreamer:
         finally:
             db.close()
 
-    def _sync_historical_gaps(self, subscriptions_dict: dict):
+    BAR_MAP = {
+        '1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m',
+        '1h': '1H', '2h': '2H', '4h': '4H', '6h': '6H', '12h': '12H',
+        '1d': '1D', '1w': '1W',
+    }
+
+    def _sync_one_symbol(self, inst_id: str, timeframe: str, bar: str, lookback_limit: int):
+        symbol = inst_id.replace("-", "/")
         db: Session = SessionLocal()
-
         try:
-            for (channel, inst_id), lookback_limit in subscriptions_dict.items():
-                symbol = inst_id.replace("-", "/")
-                timeframe = channel.replace("candle", "").lower()
+            logger.info("Historical sync: %s (%s) - fetching up to %d candles backwards...", symbol, timeframe, lookback_limit)
 
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            current_end = now_ms
+            all_ohlcv = []
+
+            while len(all_ohlcv) < lookback_limit:
                 try:
-                    tf_ms = self.exchange.parse_timeframe(timeframe) * 1000
-                except Exception as e:
-                    logger.warning("Failed to parse timeframe '%s': %s", timeframe, e)
-                    continue
+                    res = self.exchange.publicGetMarketHistoryCandles({
+                        'instId': inst_id,
+                        'bar': bar,
+                        'after': str(current_end),
+                        'limit': '100',
+                    })
 
-                logger.info("Historical sync: %s (%s) - fetching up to %d candles backwards...", symbol, timeframe, lookback_limit)
-
-                now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                current_end = now_ms
-                all_ohlcv = []
-
-                bar_map = {'1m': '1m', '3m': '3m', '5m': '5m', '15m': '15m', '30m': '30m', '1h': '1H', '2h': '2H', '4h': '4H', '1d': '1D'}
-                bar = bar_map.get(timeframe.lower(), '15m')
-
-                # Paginate backwards from now using the 'after' parameter
-                while len(all_ohlcv) < lookback_limit:
-                    try:
-                        res = self.exchange.publicGetMarketHistoryCandles({
-                            'instId': inst_id,
-                            'bar': bar,
-                            'after': str(current_end),
-                            'limit': '100'
-                        })
-
-                        if not res or 'data' not in res or not res['data']:
-                            logger.info("Reached listing date or maximum history limit for %s.", symbol)
-                            break
-
-                        data = res['data']
-                        all_ohlcv.extend(data)
-
-                        # data[-1] is the oldest candle in this batch; use it as the next pagination cursor
-                        current_end = int(data[-1][0])
-                        time.sleep(self.exchange.rateLimit / 1000)
-
-                    except Exception as ex:
-                        logger.warning("OKX historical fetch error for %s: %s", symbol, ex)
+                    if not res or 'data' not in res or not res['data']:
+                        logger.info("Reached listing date or maximum history limit for %s.", symbol)
                         break
 
-                if not all_ohlcv:
-                    continue
+                    data = res['data']
+                    all_ohlcv.extend(data)
+                    current_end = int(data[-1][0])
+                    time.sleep(0.2)
 
-                # Sort ascending by timestamp
-                all_ohlcv.sort(key=lambda x: int(x[0]))
+                except Exception as ex:
+                    logger.warning("OKX historical fetch error for %s: %s", symbol, ex)
+                    break
 
-                # Deduplicate by timestamp before inserting
-                seen_ts = set()
-                deduped = []
-                for row in all_ohlcv:
-                    ts = int(row[0])
-                    if ts not in seen_ts:
-                        seen_ts.add(ts)
-                        deduped.append(row)
+            if not all_ohlcv:
+                return
 
-                deduped = deduped[-lookback_limit:]
+            all_ohlcv.sort(key=lambda x: int(x[0]))
 
-                # Cast timestamp strings to int before dividing (OKX returns strings)
-                start_dt = datetime.fromtimestamp(int(deduped[0][0]) / 1000.0, tz=timezone.utc)
-                end_dt = datetime.fromtimestamp(int(deduped[-1][0]) / 1000.0, tz=timezone.utc)
+            seen_ts = set()
+            deduped = []
+            for row in all_ohlcv:
+                ts = int(row[0])
+                if ts not in seen_ts:
+                    seen_ts.add(ts)
+                    deduped.append(row)
 
-                existing_candles = db.query(Candle.timestamp).filter(
-                    Candle.symbol == symbol, Candle.timeframe == timeframe,
-                    Candle.timestamp >= start_dt, Candle.timestamp <= end_dt
-                ).all()
+            deduped = deduped[-lookback_limit:]
 
-                existing_times = {c[0].replace(tzinfo=timezone.utc) if c[0].tzinfo is None else c[0] for c in existing_candles}
+            start_dt = datetime.fromtimestamp(int(deduped[0][0]) / 1000.0, tz=timezone.utc)
+            end_dt = datetime.fromtimestamp(int(deduped[-1][0]) / 1000.0, tz=timezone.utc)
 
-                new_candles = []
-                for data in deduped:
-                    dt = datetime.fromtimestamp(int(data[0]) / 1000.0, tz=timezone.utc)
-                    if dt not in existing_times:
-                        try:
-                            new_candles.append(Candle(
-                                symbol=symbol, timeframe=timeframe, timestamp=dt,
-                                open=float(data[1]), high=float(data[2]), low=float(data[3]),
-                                close=float(data[4]), volume=float(data[5])
-                            ))
-                        except (IndexError, ValueError) as e:
-                            logger.warning("Skipping malformed candle data for %s: %s", symbol, e)
-                            continue
+            existing_candles = db.query(Candle.timestamp).filter(
+                Candle.symbol == symbol, Candle.timeframe == timeframe,
+                Candle.timestamp >= start_dt, Candle.timestamp <= end_dt
+            ).all()
 
-                if new_candles:
+            existing_times = {c[0].replace(tzinfo=timezone.utc) if c[0].tzinfo is None else c[0] for c in existing_candles}
+
+            new_candles = []
+            for row in deduped:
+                dt = datetime.fromtimestamp(int(row[0]) / 1000.0, tz=timezone.utc)
+                if dt not in existing_times:
                     try:
-                        db.bulk_save_objects(new_candles)
-                        db.commit()
-                        logger.info("Sync complete for %s (%s). Fetched %d rows.", symbol, timeframe, len(deduped))
-                    except Exception as e:
-                        db.rollback()
-                        logger.error("DB save error during sync (likely integrity): %s", e)
-                else:
-                    logger.info("Sync complete for %s (%s). Data was already up-to-date.", symbol, timeframe)
+                        new_candles.append(Candle(
+                            symbol=symbol, timeframe=timeframe, timestamp=dt,
+                            open=float(row[1]), high=float(row[2]), low=float(row[3]),
+                            close=float(row[4]), volume=float(row[5])
+                        ))
+                    except (IndexError, ValueError) as e:
+                        logger.warning("Skipping malformed candle data for %s: %s", symbol, e)
+                        continue
 
-        except Exception as e:
-            logger.error("Sync loop error: %s", e, exc_info=True)
+            if new_candles:
+                try:
+                    db.bulk_save_objects(new_candles)
+                    db.commit()
+                    logger.info("Sync complete for %s (%s). Saved %d new rows.", symbol, timeframe, len(new_candles))
+                except Exception as e:
+                    db.rollback()
+                    logger.error("DB save error during sync for %s: %s", symbol, e)
+            else:
+                logger.info("Sync complete for %s (%s). Data was already up-to-date.", symbol, timeframe)
         finally:
             db.close()
+
+    def _sync_historical_gaps(self, subscriptions_dict: dict):
+        tasks = []
+        for (channel, inst_id), lookback_limit in subscriptions_dict.items():
+            timeframe = channel.replace("candle", "").lower()
+            bar = self.BAR_MAP.get(timeframe)
+            if not bar:
+                logger.warning("Unknown timeframe '%s' for %s, skipping sync.", timeframe, inst_id)
+                continue
+            tasks.append((inst_id, timeframe, bar, lookback_limit))
+
+        if not tasks:
+            return
+
+        max_workers = min(len(tasks), 5)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._sync_one_symbol, inst_id, timeframe, bar, lookback_limit): inst_id
+                for inst_id, timeframe, bar, lookback_limit in tasks
+            }
+            for future in as_completed(futures):
+                inst_id = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error("Sync failed for %s: %s", inst_id, e, exc_info=True)
 
     async def _listen_to_bot_changes(self):
         queue = event_bus.subscribe("BOT_STATE_CHANGED")

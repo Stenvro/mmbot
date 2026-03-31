@@ -277,13 +277,34 @@ class BotManager:
                 elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
                 elif timeframe.endswith('d'): tf_seconds = int(timeframe[:-1]) * 86400
 
-                initial_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
+                # Use fresh sessions for all polling queries. The main `db` session starts an
+                # implicit SQLite transaction on its first read (line above), so any subsequent
+                # reads on it see a stale snapshot and will never reflect candles written by
+                # the streamer in a separate session. Fresh sessions start new transactions
+                # that see all committed data.
+                def _count_candles():
+                    _db = SessionLocal()
+                    try:
+                        return _db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
+                    finally:
+                        _db.close()
+
+                def _latest_candle_ts():
+                    _db = SessionLocal()
+                    try:
+                        return _db.query(Candle.timestamp).filter(
+                            Candle.symbol == symbol, Candle.timeframe == timeframe
+                        ).order_by(Candle.timestamp.desc()).first()
+                    finally:
+                        _db.close()
+
+                initial_count = _count_candles()
                 logger.info("Waiting for sufficient candle data for %s (currently %d candles)...", symbol, initial_count)
                 last_count = -1
                 stagnant_checks = 0
 
                 while True:
-                    current_count = db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
+                    current_count = _count_candles()
 
                     if current_count >= lookback_limit:
                         logger.info("Sufficient data available for %s (%d/%d).", symbol, current_count, lookback_limit)
@@ -303,9 +324,7 @@ class BotManager:
                     time.sleep(5)
 
                 for _ in range(20):
-                    latest_candle = db.query(Candle.timestamp).filter(
-                        Candle.symbol == symbol, Candle.timeframe == timeframe
-                    ).order_by(Candle.timestamp.desc()).first()
+                    latest_candle = _latest_candle_ts()
 
                     if latest_candle:
                         candle_ts = latest_candle[0]
@@ -314,11 +333,15 @@ class BotManager:
                         if diff_seconds <= (tf_seconds * 2): break
                     time.sleep(1)
 
-                query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
-                    Candle.symbol == symbol, Candle.timeframe == timeframe
-                ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
-
-                df = pd.read_sql(query, db.bind)
+                # Fresh session for the candle read as well — same stale-snapshot reason.
+                candle_db = SessionLocal()
+                try:
+                    query = candle_db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
+                        Candle.symbol == symbol, Candle.timeframe == timeframe
+                    ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
+                    df = pd.read_sql(query, candle_db.bind)
+                finally:
+                    candle_db.close()
 
                 if df.empty or len(df) < 50:
                     logger.info("Skipping backfill for %s: insufficient data (%d candles, minimum 50 required).", symbol, len(df))
