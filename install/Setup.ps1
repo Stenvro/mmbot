@@ -208,10 +208,12 @@ Write-Host "  [ok] npm packages installed"
 Write-Host ""
 Write-Host "SSL certificates"
 
-$CertDir = Join-Path $ROOT ".cert"
+$DataDir = Join-Path $ROOT "data"
+$CertDir = Join-Path $DataDir "cert"
 $CertFile = Join-Path $CertDir "cert.pem"
 $KeyFile = Join-Path $CertDir "key.pem"
 
+if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir | Out-Null }
 if (-not (Test-Path $CertDir)) { New-Item -ItemType Directory -Path $CertDir | Out-Null }
 
 if (-not (Test-Path $CertFile) -or -not (Test-Path $KeyFile)) {
@@ -247,7 +249,7 @@ if (-not (Test-Path $CertFile) -or -not (Test-Path $KeyFile)) {
 Write-Host ""
 Write-Host "Environment"
 
-$EnvFile = Join-Path $ROOT ".env"
+$EnvFile = Join-Path $DataDir ".env"
 
 if (Test-Path $EnvFile) {
     Write-Host "  [ok] .env already exists — leaving untouched"
@@ -267,7 +269,7 @@ if (Test-Path $EnvFile) {
 
     @"
 MASTER_API_KEY=$ApiKey
-DATABASE_URL=sqlite:///./data/apexalgo.db
+DATABASE_URL=sqlite:///./data/ApexAlgoDB.sqlite3
 ENCRYPTION_KEY=$EncKey
 VITE_API_BASE_URL=$ApiBaseUrl
 VITE_API_KEY=$ApiKey
@@ -279,11 +281,16 @@ VITE_API_KEY=$ApiKey
 }
 
 ########################################
-# Final setup
+# Final setup — symlinks so app code finds .env and .cert at project root
 ########################################
 
-$DataDir = Join-Path $ROOT "data"
-if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir | Out-Null }
+# PowerShell symlinks (matches Docker layout: data/.env -> .env, data/cert -> .cert)
+if (-not (Test-Path (Join-Path $ROOT ".env"))) {
+    New-Item -ItemType SymbolicLink -Path (Join-Path $ROOT ".env") -Target $EnvFile -Force | Out-Null
+}
+if (-not (Test-Path (Join-Path $ROOT ".cert"))) {
+    New-Item -ItemType SymbolicLink -Path (Join-Path $ROOT ".cert") -Target $CertDir -Force | Out-Null
+}
 
 ########################################
 # Done
@@ -293,8 +300,8 @@ Write-Host ""
 Write-Host "--------------------------------"
 Write-Host "Setup complete."
 Write-Host ""
-Write-Host "Next step:  .\Start_ApexAlgo.ps1"
+Write-Host "Next step:  .\install\Start_ApexAlgo.ps1"
 Write-Host ""
 Write-Host "To regenerate SSL certificates:"
-Write-Host "  Delete .cert\cert.pem and .cert\key.pem, then re-run .\Setup.ps1"
+Write-Host "  Delete data\cert\cert.pem and data\cert\key.pem, then re-run .\install\Setup.ps1"
 Write-Host "--------------------------------"

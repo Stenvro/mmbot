@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 VENV_DIR="apexalgo_venv"
-CERT_DIR=".cert"
+DATA_DIR="data"
+CERT_DIR="$DATA_DIR/cert"
 CERT_FILE="$CERT_DIR/cert.pem"
 KEY_FILE="$CERT_DIR/key.pem"
 
@@ -307,6 +308,7 @@ echo "  [ok] npm packages installed"
 echo ""
 echo "SSL certificates"
 
+mkdir -p "$DATA_DIR"
 mkdir -p "$CERT_DIR"
 
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
@@ -338,7 +340,7 @@ fi
 echo ""
 echo "Environment"
 
-if [ -f ".env" ]; then
+if [ -f "$DATA_DIR/.env" ]; then
     echo "  [ok] .env already exists — leaving untouched"
 else
     GENERATED_API_KEY=$("$PYTHON_BIN" -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -346,9 +348,9 @@ else
     PRIMARY_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
     API_BASE_URL="https://${PRIMARY_IP:-localhost}:8000"
 
-    cat > .env <<EOF
+    cat > "$DATA_DIR/.env" <<EOF
 MASTER_API_KEY=${GENERATED_API_KEY}
-DATABASE_URL=sqlite:///./data/apexalgo.db
+DATABASE_URL=sqlite:///./data/ApexAlgoDB.sqlite3
 ENCRYPTION_KEY=${GENERATED_ENC_KEY}
 VITE_API_BASE_URL=${API_BASE_URL}
 VITE_API_KEY=${GENERATED_API_KEY}
@@ -358,7 +360,9 @@ EOF
     echo "        Update this in .env if accessing from a different host."
 fi
 
-mkdir -p data
+# Symlinks so app code finds .env and .cert at project root (matches Docker layout)
+ln -sf "$DATA_DIR/.env" .env
+ln -sf "$DATA_DIR/cert" .cert
 chmod +x install/Start_ApexAlgo.sh
 
 ########################################
@@ -372,5 +376,5 @@ echo ""
 echo "Next step:  bash install/Start_ApexAlgo.sh"
 echo ""
 echo "To regenerate SSL certificates:"
-echo "  Delete .cert/cert.pem and .cert/key.pem, then re-run bash install/Setup.sh"
+echo "  Delete data/cert/cert.pem and data/cert/key.pem, then re-run bash install/Setup.sh"
 echo "--------------------------------"

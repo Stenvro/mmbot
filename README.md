@@ -98,6 +98,7 @@ First start takes ~2 minutes (builds images + compiles frontend). Subsequent sta
 | API Docs (Swagger) | `https://localhost:8000/docs` |
 
 > Accept the self-signed certificate warning in your browser on first visit.
+> For LAN access, you must also visit `https://YOUR-IP:8000` and accept the backend certificate — otherwise the browser blocks API requests from the frontend.
 
 ### Managing ApexAlgo
 
@@ -112,36 +113,34 @@ First start takes ~2 minutes (builds images + compiles frontend). Subsequent sta
 
 ### Custom LAN Access
 
-To access ApexAlgo from another device on your network:
+To access ApexAlgo from another device on your network, edit `data/.env`:
 
-```bash
-VITE_API_BASE_URL=https://YOUR-IP:8000 docker compose up -d --build
+```env
+VITE_API_BASE_URL=https://YOUR-LAN-IP:8000
 ```
 
-This rebuilds the frontend with the correct API URL.
+Then delete old certs (so they regenerate with your IP in the SAN) and rebuild:
+
+```bash
+docker compose down
+rm -f data/cert/cert.pem data/cert/key.pem
+docker compose up -d --build
+```
 
 ### Data Persistence
 
-All data is stored in a Docker volume (`apexalgo-data`):
-- Database, encryption keys, API keys, SSL certificates
+All data lives in the `data/` folder on your host (bind-mounted into both containers):
 
-| Command | Effect |
-| :--- | :--- |
-| `docker compose down` | Stops containers — **data preserved** |
-| `docker compose down -v` | Stops containers — **data destroyed** |
-
-### Migrate Existing Data into Docker
-
-If you have an existing non-Docker setup with data:
-
-```bash
-docker run --rm -v apexalgo-data:/data -v $(pwd):/host alpine sh -c "
-  cp /host/data/ApexAlgoDB.sqlite3 /data/
-  cp /host/.env /data/.env
-  mkdir -p /data/cert
-  cp /host/.cert/*.pem /data/cert/
-  echo Done"
 ```
+data/
+├── ApexAlgoDB.sqlite3    ← database
+├── .env                  ← secrets + config
+└── cert/
+    ├── cert.pem          ← SSL certificate
+    └── key.pem           ← SSL key
+```
+
+This is the same `data/` folder used by the manual install scripts — both methods are interchangeable. Stopping containers never deletes data. To fully reset, delete `data/` and restart.
 
 ---
 
@@ -257,8 +256,7 @@ ApexAlgo/
 │   ├── Setup.sh / Setup.ps1              # Legacy setup (Linux / Windows)
 │   └── Start_ApexAlgo.sh / .ps1          # Legacy start (Linux / Windows)
 ├── docker-compose.yml             # Two services: backend + frontend
-├── data/                          # SQLite database (gitignored)
-├── .cert/                         # TLS certificates (gitignored)
+├── data/                          # Database, .env, SSL certs (gitignored)
 ├── requirements.txt
 └── STRATEGY_CONTEXT.md            # AI prompt context for the visual strategy builder
 ```

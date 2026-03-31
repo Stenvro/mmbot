@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-CERT_FILE=".cert/cert.pem"
-KEY_FILE=".cert/key.pem"
+CERT_FILE="data/cert/cert.pem"
+KEY_FILE="data/cert/key.pem"
 
 ########################################
 # Pre-flight checks
@@ -14,18 +14,18 @@ KEY_FILE=".cert/key.pem"
 
 ABORT=0
 
-if [ ! -f ".env" ]; then
-    echo "ERROR: .env not found. Run ./Setup.sh first."
+if [ ! -f "data/.env" ]; then
+    echo "ERROR: data/.env not found. Run bash install/Setup.sh first."
     ABORT=1
 fi
 
 if [ ! -d "apexalgo_venv" ]; then
-    echo "ERROR: Virtual environment not found. Run ./Setup.sh first."
+    echo "ERROR: Virtual environment not found. Run bash install/Setup.sh first."
     ABORT=1
 fi
 
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-    echo "ERROR: SSL certificate files not found. Run ./Setup.sh first."
+    echo "ERROR: SSL certificate files not found. Run bash install/Setup.sh first."
     ABORT=1
 fi
 
@@ -33,7 +33,7 @@ if [ "$ABORT" -eq 1 ]; then
     exit 1
 fi
 
-if grep -q "change_me" .env 2>/dev/null; then
+if grep -q "change_me" data/.env 2>/dev/null; then
     echo "WARNING: .env contains placeholder values. Edit .env before starting."
     exit 1
 fi
@@ -52,6 +52,10 @@ done
 ########################################
 # Start services
 ########################################
+
+# Ensure symlinks exist for app code compatibility
+ln -sf data/.env .env
+ln -sf data/cert .cert
 
 echo "Starting ApexAlgo..."
 
@@ -77,7 +81,7 @@ exec bash
 ########################################
 
 # Read VITE_API_BASE_URL from .env for display
-BACKEND_URL=$(grep '^VITE_API_BASE_URL=' .env | cut -d'=' -f2 || echo "https://localhost:8000")
+BACKEND_URL=$(grep '^VITE_API_BASE_URL=' data/.env | cut -d'=' -f2 || echo "https://localhost:8000")
 
 echo ""
 echo "--------------------------------"
