@@ -9,12 +9,13 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     
     position_id = Column(Integer, ForeignKey("positions.id"), nullable=True, index=True)
-    bot_name = Column(String, index=True)               # Toegevoegd voor makkelijk filteren
-    
+    exchange = Column(String, index=True, default="okx")  # e.g. "okx", "binance"
+    bot_name = Column(String, index=True)
+
     # CRUCIAAL VOOR BELASTING/BOEKHOUDING: 'live', 'paper', of 'backtest'
     mode = Column(String, default="paper", index=True)
-    
-    exchange_order_id = Column(String, nullable=True)   # OKX Order ID
+
+    exchange_order_id = Column(String, nullable=True)
     symbol = Column(String, index=True)
     side = Column(String)                               # "buy" of "sell"
     order_type = Column(String)                         # "limit" of "market"

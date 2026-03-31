@@ -10,6 +10,7 @@ from backend.core.database import get_db
 from backend.models.exchange_keys import ExchangeKey
 from backend.core.security import verify_api_key
 from backend.core.encryption import encrypt_data, decrypt_data
+from backend.core.exchange_registry import build_exchange, build_exchange_from_key, SUPPORTED_EXCHANGES
 
 logger = logging.getLogger("apexalgo.keys")
 
@@ -24,40 +25,27 @@ class ExchangeKeyCreate(BaseModel):
     exchange: str = "okx"
     api_key: str
     api_secret: str
-    passphrase: str
+    passphrase: str = ""
     is_sandbox: bool = True
-
-
-def _create_exchange(api_key: str, secret: str, passphrase: str, is_sandbox: bool = False):
-    """Create a configured CCXT OKX exchange instance."""
-    exchange = ccxt.okx({
-        'apiKey': api_key,
-        'secret': secret,
-        'password': passphrase,
-        'enableRateLimit': True,
-        'hostname': 'eea.okx.com'
-    })
-    if is_sandbox:
-        exchange.set_sandbox_mode(True)
-    return exchange
-
-
-def _get_exchange_for_key(key_record: ExchangeKey):
-    """Decrypt credentials and create exchange instance from a DB record."""
-    dec_key = decrypt_data(key_record.api_key)
-    dec_secret = decrypt_data(key_record.api_secret)
-    dec_passphrase = decrypt_data(key_record.passphrase)
-    return _create_exchange(dec_key, dec_secret, dec_passphrase, key_record.is_sandbox)
 
 
 @router.post("")
 def save_exchange_keys(req: ExchangeKeyCreate, db: Session = Depends(get_db)):
+    exchange_id = req.exchange.lower()
+    if exchange_id not in SUPPORTED_EXCHANGES:
+        raise HTTPException(status_code=400, detail=f"Unsupported exchange '{exchange_id}'.")
     try:
-        test_exchange = _create_exchange(req.api_key, req.api_secret, req.passphrase, req.is_sandbox)
+        test_exchange = build_exchange(
+            exchange_id,
+            api_key=req.api_key,
+            api_secret=req.api_secret,
+            passphrase=req.passphrase or None,
+            sandbox=req.is_sandbox,
+        )
         test_exchange.fetch_balance()
     except Exception as e:
         logger.warning("Exchange key validation failed for '%s': %s", req.name, type(e).__name__)
-        raise HTTPException(status_code=400, detail="OKX Connection Rejected: Could not authenticate with the provided credentials.")
+        raise HTTPException(status_code=400, detail="Connection rejected: Could not authenticate with the provided credentials.")
 
     try:
         enc_key = encrypt_data(req.api_key)
@@ -97,7 +85,7 @@ def get_exchange_keys_status(db: Session = Depends(get_db)):
         is_active = False
         error_msg = ""
         try:
-            test_exchange = _get_exchange_for_key(k)
+            test_exchange = build_exchange_from_key(k)
             test_exchange.fetch_balance()
             is_active = True
         except Exception as e:
@@ -120,7 +108,7 @@ def get_key_balance(key_name: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Key '{key_name}' not found.")
 
     try:
-        exchange = _get_exchange_for_key(key_record)
+        exchange = build_exchange_from_key(key_record)
         balance_data = exchange.fetch_balance()
 
         active_balances = {}
@@ -155,7 +143,7 @@ async def execute_quick_swap(name: str, request: Request, db: Session = Depends(
         if not key_record:
             return JSONResponse(status_code=404, content={"detail": f"API Wallet '{name}' not found"})
 
-        exchange = _get_exchange_for_key(key_record)
+        exchange = build_exchange_from_key(key_record)
 
         from_asset = payload.get('from_asset', '').upper()
         to_asset = payload.get('to_asset', '').upper()
@@ -168,14 +156,12 @@ async def execute_quick_swap(name: str, request: Request, db: Session = Depends(
         if symbol_buy in exchange.markets:
             ticker = exchange.fetch_ticker(symbol_buy)
             raw_amount = (amount / ticker['last']) if payload.get('amount_type') == 'from' else amount
-            # Round to OKX precision requirements before submitting
             trade_amount = float(exchange.amount_to_precision(symbol_buy, raw_amount))
             order = exchange.create_market_buy_order(symbol_buy, trade_amount)
 
         elif symbol_sell in exchange.markets:
             ticker = exchange.fetch_ticker(symbol_sell)
             raw_amount = amount if payload.get('amount_type') == 'from' else (amount / ticker['last'])
-            # Round to OKX precision requirements before submitting
             trade_amount = float(exchange.amount_to_precision(symbol_sell, raw_amount))
             order = exchange.create_market_sell_order(symbol_sell, trade_amount)
         else:

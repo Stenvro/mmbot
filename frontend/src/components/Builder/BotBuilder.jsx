@@ -164,6 +164,9 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         const whitelistNode = nodes.find(n => n.type === 'whitelist');
         const backtestNode = nodes.find(n => n.type === 'backtest');
         const apiKeyNode = nodes.find(n => n.type === 'apiKey');
+        const apiKeyName = apiKeyNode?.data.apiKeyName || null;
+        const apiKeyRecord = apiKeyName ? availableKeys?.find(k => k.name === apiKeyName) : null;
+        const dataExchange = apiKeyRecord?.exchange || apiKeyNode?.data.dataExchange || 'okx';
 
         if (!configNode) return showError("Missing 'Main Configuration' block.");
         if (!whitelistNode) return showError("Missing 'Asset Whitelist' block.");
@@ -198,7 +201,8 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
                 backtest_on_start: backtestNode ? backtestNode.data.runOnStart : false,
                 backtest_capital: backtestNode ? backtestNode.data.capital : 1000,
                 backtest_lookback: backtestNode ? (backtestNode.data.lookback || 150) : 150,
-                api_key_name: apiKeyNode ? apiKeyNode.data.apiKeyName : null,
+                api_key_name: apiKeyName,
+                data_exchange: dataExchange,
                 trade_settings: {}, 
                 nodes: {},
                 ui_layout: {

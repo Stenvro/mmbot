@@ -17,6 +17,7 @@ from backend.models.exchange_keys import ExchangeKey
 from backend.engine.evaluator import NodeEvaluator
 from backend.core.events import event_bus
 from backend.core.encryption import decrypt_data
+from backend.core.exchange_registry import build_exchange_from_key
 
 logger = logging.getLogger("apexalgo.bot_manager")
 
@@ -39,29 +40,17 @@ class BotManager:
         while self.running:
             try:
                 event_data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                exchange = event_data.get("exchange", "okx")
                 symbol = event_data["symbol"]
                 timeframe = event_data["timeframe"]
-                asyncio.create_task(self._process_bots(symbol, timeframe))
+                asyncio.create_task(self._process_bots(exchange, symbol, timeframe))
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
 
     def _get_ccxt_instance(self, api_key_record: ExchangeKey):
-        dec_key = decrypt_data(api_key_record.api_key)
-        dec_secret = decrypt_data(api_key_record.api_secret)
-        dec_passphrase = decrypt_data(api_key_record.passphrase)
-
-        exchange = ccxt.okx({
-            'apiKey': dec_key,
-            'secret': dec_secret,
-            'password': dec_passphrase,
-            'enableRateLimit': True,
-            'hostname': 'eea.okx.com'
-        })
-        if api_key_record.is_sandbox:
-            exchange.set_sandbox_mode(True)
-        return exchange
+        return build_exchange_from_key(api_key_record)
 
     def _calculate_trade_amount(self, current_price, bot_settings):
         if not current_price or current_price <= 0:
@@ -255,10 +244,12 @@ class BotManager:
             has_key = bool(bot.settings.get("api_key_name"))
 
             live_mode = "forward_test"
+            exchange_name = bot.settings.get("data_exchange", "okx")
             if is_api_exec and has_key:
                 api_key = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
                 if api_key:
                     live_mode = "paper" if api_key.is_sandbox else "live"
+                    exchange_name = api_key.exchange or exchange_name
                 else:
                     logger.warning("Bot '%s': api_key_name='%s' not found in database. Falling back to forward_test mode.", bot.name, bot.settings.get("api_key_name"))
 
@@ -285,7 +276,7 @@ class BotManager:
                 def _count_candles():
                     _db = SessionLocal()
                     try:
-                        return _db.query(Candle.id).filter(Candle.symbol == symbol, Candle.timeframe == timeframe).count()
+                        return _db.query(Candle.id).filter(Candle.exchange == exchange_name, Candle.symbol == symbol, Candle.timeframe == timeframe).count()
                     finally:
                         _db.close()
 
@@ -293,7 +284,7 @@ class BotManager:
                     _db = SessionLocal()
                     try:
                         return _db.query(Candle.timestamp).filter(
-                            Candle.symbol == symbol, Candle.timeframe == timeframe
+                            Candle.exchange == exchange_name, Candle.symbol == symbol, Candle.timeframe == timeframe
                         ).order_by(Candle.timestamp.desc()).first()
                     finally:
                         _db.close()
@@ -337,7 +328,7 @@ class BotManager:
                 candle_db = SessionLocal()
                 try:
                     query = candle_db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
-                        Candle.symbol == symbol, Candle.timeframe == timeframe
+                        Candle.exchange == exchange_name, Candle.symbol == symbol, Candle.timeframe == timeframe
                     ).order_by(Candle.timestamp.desc()).limit(lookback_limit).statement
                     df = pd.read_sql(query, candle_db.bind)
                 finally:
@@ -417,10 +408,10 @@ class BotManager:
                             trade_entry_indices.append(index)
                             original_amount = trade_amount
                             bt_entry_price = current_price * (1 + bt_entry_slippage)
-                            open_bt_pos = Position(bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=bt_entry_price, amount=trade_amount)
+                            open_bt_pos = Position(exchange=exchange_name, bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=bt_entry_price, amount=trade_amount)
                             db.add(open_bt_pos)
                             db.flush()
-                            db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=bt_entry_price, amount=trade_amount, timestamp=ts, status="filled"))
+                            db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=bt_entry_price, amount=trade_amount, timestamp=ts, status="filled"))
                             just_opened_this_tick = True
 
                         elif open_bt_pos and not just_opened_this_tick:
@@ -437,7 +428,7 @@ class BotManager:
                                 if close_qty <= 0: continue
 
                                 actual_price = ev['price'] * (1 - bt_exit_slippage)
-                                db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled"))
+                                db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled"))
 
                                 entry_cost = open_bt_pos.entry_price * close_qty * (1 + bt_entry_fee)
                                 exit_proceeds = actual_price * close_qty * (1 - bt_exit_fee)
@@ -493,7 +484,7 @@ class BotManager:
 
                         open_bt_pos.status = "closed"
                         open_bt_pos.closed_at = last_ts
-                        db.add(Order(position_id=open_bt_pos.id, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=last_price, amount=remaining_qty, timestamp=last_ts, status="filled"))
+                        db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=last_price, amount=remaining_qty, timestamp=last_ts, status="filled"))
 
                         if open_bt_pos.id in self.position_states:
                             del self.position_states[open_bt_pos.id]
@@ -510,7 +501,7 @@ class BotManager:
         finally:
             db.close()
 
-    async def _process_bots(self, symbol: str, timeframe: str):
+    async def _process_bots(self, exchange: str, symbol: str, timeframe: str):
         def run_logic():
             db = SessionLocal()
             try:
@@ -521,7 +512,14 @@ class BotManager:
                     syms = b.settings.get("symbols", [])
                     if not syms and b.settings.get("symbol"):
                         syms = [b.settings.get("symbol")]
-                    if symbol in syms and b.settings.get("timeframe") == timeframe:
+                    # Match on exchange: derive bot's exchange from its key or data_exchange setting
+                    api_key_name = b.settings.get("api_key_name")
+                    bot_exchange = b.settings.get("data_exchange", "okx")
+                    if api_key_name:
+                        key_rec = db.query(ExchangeKey).filter(ExchangeKey.name == api_key_name).first()
+                        if key_rec:
+                            bot_exchange = key_rec.exchange or bot_exchange
+                    if symbol in syms and b.settings.get("timeframe") == timeframe and bot_exchange == exchange:
                         matching_bots.append(b)
 
                 if not matching_bots: return
@@ -529,7 +527,7 @@ class BotManager:
                 max_lookback = max([int(b.settings.get("backtest_lookback", 150)) for b in matching_bots], default=150)
 
                 query = db.query(Candle.id, Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume).filter(
-                    Candle.symbol == symbol, Candle.timeframe == timeframe
+                    Candle.exchange == exchange, Candle.symbol == symbol, Candle.timeframe == timeframe
                 ).order_by(Candle.timestamp.desc()).limit(max_lookback).statement
 
                 df = pd.read_sql(query, db.bind)
@@ -677,20 +675,20 @@ class BotManager:
                                         buy_fee = float(okx_order["fee"].get("cost", 0) or 0)
 
                                 # Position created after successful exchange order
-                                open_position = Position(bot_name=bot.name, symbol=symbol, mode=mode, status="open", side="long", entry_price=actual_price, amount=trade_amount)
+                                open_position = Position(exchange=exchange, bot_name=bot.name, symbol=symbol, mode=mode, status="open", side="long", entry_price=actual_price, amount=trade_amount)
                                 db.add(open_position)
                                 db.flush()
                                 just_opened_ids.add(open_position.id)
 
-                                db.add(Order(position_id=open_position.id, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=actual_price, amount=trade_amount, timestamp=latest_time, exchange_order_id=order_id, status="filled", fee=buy_fee))
+                                db.add(Order(position_id=open_position.id, exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=actual_price, amount=trade_amount, timestamp=latest_time, exchange_order_id=order_id, status="filled", fee=buy_fee))
                                 logger.info("%s BUY Filled @ %s", mode.upper(), actual_price)
 
                             except ccxt.InsufficientFunds as e:
                                 logger.warning("%s BUY rejected (insufficient funds): %s", mode.upper(), e)
-                                db.add(Order(bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="rejected"))
+                                db.add(Order(exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="rejected"))
                             except Exception as e:
                                 logger.error("%s BUY failed: %s", mode.upper(), e, exc_info=True)
-                                db.add(Order(bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="canceled"))
+                                db.add(Order(exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="canceled"))
 
                     active_positions = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.status == "open", Position.mode == mode).all()
 
@@ -739,7 +737,7 @@ class BotManager:
                                     if okx_order.get("fee"):
                                         actual_fee = float(okx_order["fee"].get("cost", 0) or 0)
 
-                                db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=latest_time, exchange_order_id=order_id, status="filled", fee=actual_fee))
+                                db.add(Order(position_id=pos.id, exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=latest_time, exchange_order_id=order_id, status="filled", fee=actual_fee))
 
                                 # Fee-adjusted P&L: subtract proportional entry fee + exit fee
                                 total_buy_fees = sum((o.fee or 0.0) for o in (pos.orders or []) if o.side == "buy" and o.status == "filled")
@@ -769,7 +767,7 @@ class BotManager:
                                 logger.info("%s SELL (%s) Filled @ %s", mode.upper(), ev['reason'], actual_price)
                             except Exception as e:
                                 logger.error("%s SELL failed: %s", mode.upper(), e, exc_info=True)
-                                db.add(Order(position_id=pos.id, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=latest_time, status="rejected"))
+                                db.add(Order(position_id=pos.id, exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=latest_time, status="rejected"))
 
                     standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr']
                     indicators = { col: float(latest_row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(latest_row[col]) }

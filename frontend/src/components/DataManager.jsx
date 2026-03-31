@@ -10,9 +10,20 @@ export default function DataManager({ openChart, setError }) {
   const [syncingSymbol, setSyncingSymbol] = useState(null);
 
   const [symbol, setSymbol] = useState('BTC-USDC');
+  const [exchange, setExchange] = useState('okx');
   const [timeframe, setTimeframe] = useState('1d');
   const [startDate, setStartDate] = useState('2024-01-01T00:00');
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 16));
+
+  const EXCHANGES = [
+    { id: 'okx', name: 'OKX' },
+    { id: 'binance', name: 'Binance' },
+    { id: 'bitvavo', name: 'Bitvavo' },
+    { id: 'coinbase', name: 'Coinbase' },
+    { id: 'cryptocom', name: 'Crypto.com' },
+    { id: 'kraken', name: 'Kraken' },
+    { id: 'kucoin', name: 'KuCoin' },
+  ];
 
   const [modalConfig, setModalConfig] = useState(null);
   const [pruneModalConfig, setPruneModalConfig] = useState(null);
@@ -51,6 +62,7 @@ export default function DataManager({ openChart, setError }) {
     if (setError) setError(null);
     try {
       const payload = {
+        exchange: exchange,
         timeframe: timeframe,
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString()
@@ -78,6 +90,7 @@ export default function DataManager({ openChart, setError }) {
     if (setError) setError(null);
     try {
       const payload = {
+        exchange: row.exchange || 'okx',
         timeframe: row.timeframe,
         start_date: new Date(row.newest_candle).toISOString(),
         end_date: new Date().toISOString()
@@ -221,6 +234,14 @@ export default function DataManager({ openChart, setError }) {
       <GlowPanel glowColor="gold">
         <h3 className="text-[#848e9c] text-[10px] font-bold mb-3 uppercase tracking-wider">Historical Data Engine</h3>
         <form onSubmit={handleDownload} className="flex flex-wrap gap-4 items-end">
+          <div className="w-32">
+            <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">Exchange</label>
+            <select value={exchange} onChange={e => setExchange(e.target.value)} className={inputClass}>
+              {EXCHANGES.map(ex => (
+                <option key={ex.id} value={ex.id}>{ex.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex-1 min-w-[120px]">
             <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">Asset Pair</label>
             <input type="text" required value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())} className={inputClass} />
@@ -279,6 +300,7 @@ export default function DataManager({ openChart, setError }) {
             <table className="w-full text-left whitespace-nowrap min-w-[700px] relative">
               <thead className="bg-[#080a0f]/80 border-b border-[#202532] text-[9px] text-[#848e9c] uppercase tracking-wider sticky top-0 z-10">
                 <tr>
+                  <th className="px-5 py-2.5 font-bold">Exchange</th>
                   <th className="px-5 py-2.5 font-bold">Symbol</th>
                   <th className="px-5 py-2.5 font-bold">Interval</th>
                   <th className="px-5 py-2.5 font-bold">Data Points</th>
@@ -292,6 +314,7 @@ export default function DataManager({ openChart, setError }) {
                   const isSyncing = syncingSymbol === `${row.symbol}_${row.timeframe}`;
                   return (
                     <tr key={i} className="border-b border-[#202532]/40 hover:bg-[#fcd535]/[0.02] transition-colors duration-150 group">
+                      <td className="px-5 py-2.5 text-[#fcd535] font-bold uppercase text-[10px]">{row.exchange || 'okx'}</td>
                       <td className="px-5 py-2.5 text-[#eaecef] font-bold">{row.symbol}</td>
                       <td className="px-5 py-2.5 text-[#0ea5e9] font-bold">{row.timeframe}</td>
                       <td className="px-5 py-2.5 font-mono text-[#848e9c] group-hover:text-[#eaecef] transition-colors">{row.count.toLocaleString()}</td>
@@ -328,7 +351,7 @@ export default function DataManager({ openChart, setError }) {
                 })}
                 {filteredData.length === 0 && (
                   <tr>
-                    <td colSpan="6" className="p-12 text-center text-[#848e9c] text-xs">
+                    <td colSpan="7" className="p-12 text-center text-[#848e9c] text-xs">
                       No data matches your filters or the database is empty.
                     </td>
                   </tr>

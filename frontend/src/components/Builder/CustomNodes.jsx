@@ -213,23 +213,56 @@ export const BacktestNode = ({ id, data }) => (
   </div>
 );
 
-export const ApiKeyNode = ({ id, data }) => (
-  <div className="bg-[#12151c]/90 backdrop-blur-xl border border-[#0ea5e9] rounded-xl shadow-lg min-w-[260px]">
-    <div className="bg-[#0ea5e9]/10 px-3 py-2 border-b border-[#0ea5e9]/30 flex justify-between items-center">
-      <span className="font-bold text-[#0ea5e9] text-[11px] uppercase tracking-wider">EXCHANGE ROUTING</span>
-      {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
+const API_KEY_NODE_EXCHANGES = [
+  { id: 'okx', name: 'OKX' },
+  { id: 'binance', name: 'Binance' },
+  { id: 'bitvavo', name: 'Bitvavo' },
+  { id: 'coinbase', name: 'Coinbase' },
+  { id: 'cryptocom', name: 'Crypto.com' },
+  { id: 'kraken', name: 'Kraken' },
+  { id: 'kucoin', name: 'KuCoin' },
+];
+
+export const ApiKeyNode = ({ id, data }) => {
+  const selectedKey = data.apiKeyName || '';
+  const keyRecord = data.availableKeys?.find(k => k.name === selectedKey);
+  const derivedExchange = keyRecord?.exchange || null;
+
+  return (
+    <div className="bg-[#12151c]/90 backdrop-blur-xl border border-[#0ea5e9] rounded-xl shadow-lg min-w-[260px]">
+      <div className="bg-[#0ea5e9]/10 px-3 py-2 border-b border-[#0ea5e9]/30 flex justify-between items-center">
+        <span className="font-bold text-[#0ea5e9] text-[11px] uppercase tracking-wider">EXCHANGE ROUTING</span>
+        {data.onDelete && <button onClick={() => data.onDelete(id)} className="text-[#848e9c] hover:text-[#f6465d] transition-colors">✕</button>}
+      </div>
+      <div className="p-4 bg-[#080a0f]/80 rounded-b space-y-3">
+        <div>
+          <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Select API Credentials</label>
+          <select className="w-full bg-[#12151c] border border-[#202532] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={selectedKey} onChange={(e) => data.onChange(id, 'apiKeyName', e.target.value)}>
+            <option value="">No key (select exchange below)</option>
+            {data.availableKeys?.map(k => (
+              <option key={k.name} value={k.name}>{k.name} ({k.is_sandbox ? 'Sandbox' : 'Live'})</option>
+            ))}
+          </select>
+        </div>
+        {derivedExchange ? (
+          <div className="flex items-center space-x-2 px-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#2ebd85] shadow-[0_0_6px_#2ebd85]" />
+            <span className="text-[10px] text-[#848e9c] uppercase font-bold">Exchange: <span className="text-[#2ebd85]">{derivedExchange.toUpperCase()}</span></span>
+          </div>
+        ) : (
+          <div>
+            <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Data Exchange</label>
+            <select className="w-full bg-[#12151c] border border-[#202532] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={data.dataExchange || 'okx'} onChange={(e) => data.onChange(id, 'dataExchange', e.target.value)}>
+              {API_KEY_NODE_EXCHANGES.map(ex => (
+                <option key={ex.id} value={ex.id}>{ex.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
     </div>
-    <div className="p-4 bg-[#080a0f]/80 rounded-b">
-      <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Select API Credentials</label>
-      <select className="w-full bg-[#12151c] border border-[#202532] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#0ea5e9] outline-none" value={data.apiKeyName !== undefined ? data.apiKeyName : ""} onChange={(e) => data.onChange(id, 'apiKeyName', e.target.value)}>
-        <option value="">No key selected (Local Engine)</option>
-        {data.availableKeys?.map(k => (
-          <option key={k.name} value={k.name}>{k.name} ({k.is_sandbox ? 'Sandbox' : 'Live'})</option>
-        ))}
-      </select>
-    </div>
-  </div>
-);
+  );
+};
 
 // ==========================================
 // 2. LOGIC AND DATA NODES

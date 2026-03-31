@@ -14,10 +14,22 @@ export default function Settings({ setError }) {
   const [fetchingBalanceFor, setFetchingBalanceFor] = useState(null);
 
   const [keyName, setKeyName] = useState('');
+  const [selectedExchange, setSelectedExchange] = useState('okx');
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [isSandbox, setIsSandbox] = useState(true);
+
+  const EXCHANGES = [
+    { id: 'okx', name: 'OKX' },
+    { id: 'binance', name: 'Binance' },
+    { id: 'bitvavo', name: 'Bitvavo' },
+    { id: 'coinbase', name: 'Coinbase' },
+    { id: 'cryptocom', name: 'Crypto.com' },
+    { id: 'kraken', name: 'Kraken' },
+    { id: 'kucoin', name: 'KuCoin' },
+  ];
+  const needsPassphrase = ['okx', 'kucoin'].includes(selectedExchange);
 
   const [modalConfig, setModalConfig] = useState(null);
 
@@ -50,10 +62,10 @@ export default function Settings({ setError }) {
     try {
       await apiClient.post('/api/keys', {
         name: keyName,
-        exchange: 'okx',
+        exchange: selectedExchange,
         api_key: apiKey,
         api_secret: apiSecret,
-        passphrase: passphrase,
+        passphrase: needsPassphrase ? passphrase : '',
         is_sandbox: isSandbox
       });
       setModalConfig({
@@ -340,7 +352,15 @@ export default function Settings({ setError }) {
       <GlowPanel>
         <SectionHeader title="Configure API Key" accentColor="white" />
         <form onSubmit={handleSave} className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
-          <div className="col-span-1 md:col-span-2">
+          <div>
+            <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Exchange</label>
+            <select value={selectedExchange} onChange={e => setSelectedExchange(e.target.value)} className={inputClass}>
+              {EXCHANGES.map(ex => (
+                <option key={ex.id} value={ex.id}>{ex.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Connection Name</label>
             <input type="text" required value={keyName} onChange={e => setKeyName(e.target.value)} className={inputClass} placeholder="e.g. Production Wallet" />
           </div>
@@ -352,10 +372,12 @@ export default function Settings({ setError }) {
             <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Secret Key</label>
             <input type="password" required value={apiSecret} onChange={e => setApiSecret(e.target.value)} className={inputClass} placeholder="••••••••••••••••" />
           </div>
-          <div className="col-span-1 md:col-span-2">
-            <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Passphrase</label>
-            <input type="password" required value={passphrase} onChange={e => setPassphrase(e.target.value)} className={inputClass} placeholder="Your OKX API Passphrase" />
-          </div>
+          {needsPassphrase && (
+            <div className="col-span-1 md:col-span-2">
+              <label className="block text-[10px] font-bold uppercase text-[#848e9c] mb-1.5">Passphrase</label>
+              <input type="password" required value={passphrase} onChange={e => setPassphrase(e.target.value)} className={inputClass} placeholder="API Passphrase" />
+            </div>
+          )}
 
           <div className="col-span-1 md:col-span-2 flex items-center justify-between pt-4 border-t border-[#202532] mt-2">
             <label className="flex items-center cursor-pointer group">

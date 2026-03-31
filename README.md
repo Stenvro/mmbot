@@ -8,7 +8,7 @@
 ![CCXT](https://img.shields.io/badge/CCXT-Integrated-orange?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Alpha-yellow?style=for-the-badge)
 
-ApexAlgo is a full-stack algorithmic trading platform for building, backtesting, and executing systematic trading strategies — without writing code. A node-based visual strategy builder connects directly to a high-performance async execution engine with real-time market data and encrypted exchange key management.
+ApexAlgo is a full-stack algorithmic trading platform for building, backtesting, and executing systematic trading strategies — without writing code. A node-based visual strategy builder connects directly to a high-performance async execution engine with multi-exchange market data and encrypted exchange key management.
 
 > **Alpha release — not production-ready.** APIs and data schemas may change between versions.
 
@@ -19,13 +19,20 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 ### Strategy Builder
 - **Visual Node Editor** — drag-and-drop canvas with 51+ technical indicators, logic gates, conditions, and action nodes
 - **No-Code Strategy Design** — connect indicator, condition, and logic nodes to build complex entry/exit rules
+- **Exchange Routing Node** — select an API key (auto-derives exchange) or manually pick a data exchange when running without a key
 - **ReactFlow Graph Serialization** — strategies are compiled to JSON and evaluated per candle
 
 ### Execution Engine
 - **Three Execution Modes** — forward test (simulated), paper trading (sandbox API), and live exchange execution
 - **Async Event-Driven Architecture** — FastAPI backend with concurrent bot management via asyncio
-- **Real-Time Market Data** — WebSocket ingestion from OKX with automatic reconnection
+- **Multi-Exchange Market Data** — universal REST polling via CCXT; each `(exchange, symbol, timeframe)` gets its own independent polling stream
 - **CCXT Integration** — exchange-agnostic order execution with market precision handling
+
+### Multi-Exchange Support
+- **7 Exchanges out of the box** — OKX, Binance, Bitvavo, Coinbase, Crypto.com, Kraken, KuCoin
+- **Isolated data streams** — bots on different exchanges poll independently and store candles separately; no cross-exchange data mixing
+- **Exchange Registry** — centralized `exchange_registry.py` handles per-exchange config (OKX EU hostname, passphrase exchanges, sandbox modes)
+- **Automatic migration** — existing databases are upgraded non-destructively on startup; all historical OKX data is preserved
 
 ### Backtesting
 - **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods
@@ -145,24 +152,30 @@ screen -r apex_frontend   # attach to frontend
 ```
 ApexAlgo/
 ├── backend/
-│   ├── core/              # database, encryption, security, event bus
+│   ├── core/
+│   │   ├── database.py        # SQLAlchemy engine, session, idempotent migrations
+│   │   ├── exchange_registry.py   # CCXT exchange factory for all supported exchanges
+│   │   ├── encryption.py      # Fernet credential encryption/decryption
+│   │   ├── events.py          # Async event bus (CANDLE_CLOSED, BOT_STATE_CHANGED)
+│   │   └── security.py        # API key authentication
 │   ├── engine/
 │   │   ├── bot_manager.py     # core trading engine: backfill, live processing, order execution
+│   │   ├── candle_poller.py   # universal multi-exchange REST polling (replaces OKX WebSocket)
 │   │   ├── evaluator.py       # node graph resolver using pandas_ta
-│   │   ├── settings_validator.py  # bot settings integrity checks
-│   │   └── websocket_streamer.py  # OKX WebSocket data ingestion
-│   ├── models/            # SQLAlchemy ORM (BotConfig, Position, Order, Signal, Candle, ExchangeKey)
-│   ├── routers/           # API route handlers (bots, trades, data, keys)
-│   └── main.py            # app init, CORS, lifespan, migrations
+│   │   └── settings_validator.py  # bot settings integrity checks
+│   ├── models/                # SQLAlchemy ORM (BotConfig, Position, Order, Signal, Candle, ExchangeKey)
+│   ├── routers/               # API route handlers (bots, trades, data, keys)
+│   └── main.py                # app init, CORS, lifespan, migrations
 ├── frontend/
 │   └── src/
-│       ├── api/           # axios client with auth interceptor
+│       ├── api/               # axios client with auth interceptor
 │       └── components/
-│           ├── Builder/       # visual strategy editor (BotBuilder, CustomNodes, indicatorConfig)
+│           ├── Builder/           # visual strategy editor (BotBuilder, CustomNodes, indicatorConfig)
 │           ├── ChartEngine.jsx    # TradingView charts with indicator overlays
 │           ├── BotManagerUI.jsx   # bot list, start/stop controls
+│           ├── DataManager.jsx    # historical data download and management (multi-exchange)
 │           ├── TradeManager.jsx   # position/order analytics, P&L tracking
-│           └── Settings.jsx       # exchange key management
+│           └── Settings.jsx       # exchange key management (multi-exchange)
 ├── data/                  # SQLite database (gitignored)
 ├── .cert/                 # TLS certificates (gitignored)
 ├── requirements.txt
@@ -185,7 +198,8 @@ Strategy Builder (ReactFlow) ──serialize──> Bot Settings JSON
                                                 │
                                      Bot Start ──> Backfill (historical backtest)
                                                 │
-                                     WebSocket ──> CANDLE_CLOSED event
+                             CandlePoller (per exchange/symbol/timeframe)
+                                  └── fetch_ohlcv polling ──> CANDLE_CLOSED event
                                                 │
                                      NodeEvaluator resolves indicator → condition → logic
                                                 │
@@ -193,12 +207,28 @@ Strategy Builder (ReactFlow) ──serialize──> Bot Settings JSON
                                                 │
                           ┌─────────────────────┼─────────────────────┐
                     Forward Test           Paper (Sandbox)          Live Exchange
-                   (local simulation)     (OKX sandbox API)       (OKX production)
+                   (local simulation)   (exchange sandbox API)   (exchange production)
                                                 │
                                      Position + Order + Signal ──> DB
                                                 │
                                      ChartEngine + TradeManager ──> UI
 ```
+
+---
+
+## Supported Exchanges
+
+| Exchange | Passphrase | Sandbox | Notes |
+| :--- | :--- | :--- | :--- |
+| OKX | Yes | Yes | EU hostname (eea.okx.com) |
+| Binance | No | Yes | |
+| Bitvavo | No | No | EU exchange |
+| Coinbase | No | No | |
+| Crypto.com | No | No | |
+| Kraken | No | No | |
+| KuCoin | Yes | Yes | |
+
+Adding support for any other CCXT-compatible exchange requires only adding it to the frontend dropdowns and `SUPPORTED_EXCHANGES` in `exchange_registry.py`.
 
 ---
 

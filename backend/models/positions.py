@@ -7,7 +7,8 @@ class Position(Base):
     __tablename__ = "positions"
 
     id = Column(Integer, primary_key=True, index=True)
-    bot_name = Column(String, index=True)               
+    exchange = Column(String, index=True, default="okx")  # e.g. "okx", "binance"
+    bot_name = Column(String, index=True)
     symbol = Column(String, index=True)                 
     
     # CRUCIAAL VOOR BELASTING/BOEKHOUDING: 'live', 'paper', of 'backtest'
