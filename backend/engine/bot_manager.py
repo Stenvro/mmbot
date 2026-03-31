@@ -309,7 +309,7 @@ class BotManager:
 
                     if current_count == last_count:
                         stagnant_checks += 1
-                        max_stagnant = 8 if current_count == initial_count else 2
+                        max_stagnant = 24 if current_count == initial_count else 6
 
                         if stagnant_checks >= max_stagnant:
                             logger.info("Data ingestion stalled for %s at %d candles. Proceeding with available data.", symbol, current_count)

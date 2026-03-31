@@ -138,10 +138,9 @@ export default function TradeManager({ setError }) {
     // ── Data fetching ─────────────────────────────────────────────────────────
 
     const fetchLivePrices = useCallback(async (currentPositions) => {
-        const activePos = currentPositions.filter(p => p.status === 'open');
-        if (activePos.length === 0) return;
+        const uniqueSymbols = [...new Set(currentPositions.map(p => p.symbol))];
+        if (uniqueSymbols.length === 0) return;
         setPriceSyncing(true);
-        const uniqueSymbols = [...new Set(activePos.map(p => p.symbol))];
         const priceMap = {};
         for (const sym of uniqueSymbols) {
             try {
@@ -529,7 +528,7 @@ export default function TradeManager({ setError }) {
                 />
                 <Stat
                     label="Max Drawdown"
-                    value={stats.total > 0 ? `-${safeNum(stats.maxDD, 1)}%` : '—'}
+                    value={stats.total > 0 ? `-${safeNum(stats.maxDD, 2)}%` : '—'}
                     sub="peak-to-trough"
                     accent={stats.maxDD > 20 ? 'red' : 'white'}
                     border={stats.maxDD > 20 ? '#f6465d' : '#202532'}
@@ -550,7 +549,7 @@ export default function TradeManager({ setError }) {
                 />
                 <Stat
                     label="Total Fees Paid"
-                    value={stats.totalFees > 0 ? `-$${safeNum(stats.totalFees)}` : '—'}
+                    value={stats.total > 0 ? `-$${safeNum(stats.totalFees)}` : '—'}
                     sub="all linked orders"
                     accent={stats.totalFees > 0 ? 'red' : 'white'}
                     border="#202532"
@@ -629,7 +628,7 @@ export default function TradeManager({ setError }) {
                                             <div className="flex justify-between mb-0.5">
                                                 <span className="text-[9px] text-[#848e9c] uppercase font-bold">Buy & Hold</span>
                                                 <span className={`text-[9px] font-mono font-bold ${d.bhPct !== null ? pnlColor(d.bhPct) : 'text-[#848e9c]'}`}>
-                                                    {d.bhPct !== null ? `${pnlSign(d.bhPct)}${safeNum(d.bhPct, 1)}%` : 'Loading…'}
+                                                    {d.bhPct !== null ? `${pnlSign(d.bhPct)}${safeNum(d.bhPct, 1)}%` : (priceSyncing ? 'Loading…' : 'N/A')}
                                                 </span>
                                             </div>
                                             <div className="h-1 bg-[#202532] rounded-full overflow-hidden">
