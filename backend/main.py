@@ -22,6 +22,7 @@ from backend.models.signals import Signal
 from backend.models.preferences import Preference
 from backend.models.exchange_keys import ExchangeKey
 from backend.models.bots import BotConfig
+from backend.models.bot_logs import BotLog
 
 # Import the routers
 from backend.routers import keys, data, bots, trades

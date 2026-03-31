@@ -1,7 +1,8 @@
 import logging
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ from backend.models.positions import Position
 from backend.core.events import event_bus
 from backend.core.security import verify_api_key
 from backend.engine.settings_validator import validate_bot_settings
+from backend.core import bot_log_buffer as blb
 
 logger = logging.getLogger("apexalgo.bots")
 
@@ -105,6 +107,43 @@ def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
         is_sandbox=bot_in.is_sandbox,
         strategy=bot_in.strategy,
         settings=bot_in.settings,
+        is_active=False
+    )
+    db.add(new_bot)
+    db.commit()
+    db.refresh(new_bot)
+
+    result = {
+        "id": new_bot.id, "name": new_bot.name, "is_sandbox": new_bot.is_sandbox,
+        "strategy": new_bot.strategy, "settings": new_bot.settings,
+        "is_active": new_bot.is_active, "created_at": new_bot.created_at.isoformat() if new_bot.created_at else None,
+    }
+    if validation["warnings"]:
+        result["validation_warnings"] = validation["warnings"]
+    return result
+
+@router.post("/import")
+def import_bot(payload: dict = Body(...), db: Session = Depends(get_db)):
+    try:
+        bot_data = payload.get("bot")
+        if not bot_data:
+            raise HTTPException(status_code=400, detail="Invalid file: missing 'bot' key.")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid bot file format.")
+
+    name = bot_data.get("name", "Imported Bot")
+    if db.query(BotConfig).filter(BotConfig.name == name).first():
+        name = f"{name} (imported)"
+
+    validation = validate_bot_settings(bot_data.get("settings", {}))
+    if validation["errors"]:
+        raise HTTPException(status_code=400, detail={"validation_errors": validation["errors"]})
+
+    new_bot = BotConfig(
+        name=name,
+        is_sandbox=bot_data.get("is_sandbox", True),
+        strategy=bot_data.get("strategy", "node_evaluator"),
+        settings=bot_data.get("settings", {}),
         is_active=False
     )
     db.add(new_bot)
@@ -219,12 +258,71 @@ async def stop_bot(bot_id: int, db: Session = Depends(get_db)):
     await event_bus.publish("BOT_STATE_CHANGED", {"bot_id": bot.id, "action": "stopped"})
     return {"message": f"Bot '{bot.name}' stopped.", "is_active": False}
 
+@router.post("/{bot_id}/duplicate")
+def duplicate_bot(bot_id: int, db: Session = Depends(get_db)):
+    source = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Bot not found.")
+
+    base_name = source.name
+    new_name = f"{base_name} (copy)"
+    for i in range(2, 11):
+        if not db.query(BotConfig).filter(BotConfig.name == new_name).first():
+            break
+        new_name = f"{base_name} (copy {i})"
+    else:
+        raise HTTPException(status_code=400, detail="Too many copies of this bot already exist.")
+
+    new_bot = BotConfig(
+        name=new_name,
+        is_sandbox=source.is_sandbox,
+        strategy=source.strategy,
+        settings=dict(source.settings or {}),
+        is_active=False
+    )
+    db.add(new_bot)
+    db.commit()
+    db.refresh(new_bot)
+    return {
+        "id": new_bot.id, "name": new_bot.name, "is_sandbox": new_bot.is_sandbox,
+        "strategy": new_bot.strategy, "settings": new_bot.settings,
+        "is_active": new_bot.is_active, "created_at": new_bot.created_at.isoformat() if new_bot.created_at else None,
+    }
+
+@router.get("/{bot_id}/export")
+def export_bot(bot_id: int, db: Session = Depends(get_db)):
+    bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found.")
+    payload = {
+        "apex_version": "1.0",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "bot": {
+            "name": bot.name,
+            "is_sandbox": bot.is_sandbox,
+            "strategy": bot.strategy,
+            "settings": bot.settings or {}
+        }
+    }
+    filename = bot.name.replace(' ', '_') + ".apex.json"
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+@router.get("/{bot_name}/logs")
+def get_bot_logs(bot_name: str, since: int = Query(default=0)):
+    entries = blb.get_logs(bot_name, since_id=since)
+    return {"bot_name": bot_name, "entries": entries}
+
 @router.delete("/{bot_name}/cache")
 def clear_bot_cache(bot_name: str, db: Session = Depends(get_db)):
     try:
         deleted_signals = db.query(Signal).filter(Signal.bot_name == bot_name).delete(synchronize_session=False)
         db.commit()
-        return {"status": "success", "message": f"Cache cleared. {deleted_signals} signals removed."}
+        blb.clear(bot_name)
+        return {"status": "success", "message": f"Cache cleared. {deleted_signals} signals removed. Log buffer reset."}
     except Exception as e:
         db.rollback()
         logger.error("Failed to clear cache for '%s': %s", bot_name, e)

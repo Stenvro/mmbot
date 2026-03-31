@@ -18,6 +18,7 @@ from backend.engine.evaluator import NodeEvaluator
 from backend.core.events import event_bus
 from backend.core.encryption import decrypt_data
 from backend.core.exchange_registry import build_exchange_from_key
+from backend.core import bot_log_buffer as blb
 
 logger = logging.getLogger("apexalgo.bot_manager")
 
@@ -236,9 +237,11 @@ class BotManager:
 
     def _execute_sync_backfill(self, bot_id: int):
         db = SessionLocal()
+        _log_name = f"bot_id={bot_id}"
         try:
             bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
             if not bot or not bot.is_active: return
+            _log_name = bot.name
 
             is_api_exec = bot.settings.get("api_execution", False)
             has_key = bool(bot.settings.get("api_key_name"))
@@ -252,6 +255,7 @@ class BotManager:
                     exchange_name = api_key.exchange or exchange_name
                 else:
                     logger.warning("Bot '%s': api_key_name='%s' not found in database. Falling back to forward_test mode.", bot.name, bot.settings.get("api_key_name"))
+                    blb.push(bot.name, "WARN", f"API key '{bot.settings.get('api_key_name')}' not found, running as forward_test")
 
             timeframe = bot.settings.get("timeframe")
             exit_node = bot.settings.get("exit_node")
@@ -291,6 +295,7 @@ class BotManager:
 
                 initial_count = _count_candles()
                 logger.info("Waiting for sufficient candle data for %s (currently %d candles)...", symbol, initial_count)
+                blb.push(bot.name, "INFO", f"Waiting for candle data: {symbol} ({initial_count} candles)")
                 last_count = -1
                 stagnant_checks = 0
 
@@ -299,6 +304,7 @@ class BotManager:
 
                     if current_count >= lookback_limit:
                         logger.info("Sufficient data available for %s (%d/%d).", symbol, current_count, lookback_limit)
+                        blb.push(bot.name, "INFO", f"Data ready: {symbol} ({current_count}/{lookback_limit} candles)")
                         break
 
                     if current_count == last_count:
@@ -307,6 +313,7 @@ class BotManager:
 
                         if stagnant_checks >= max_stagnant:
                             logger.info("Data ingestion stalled for %s at %d candles. Proceeding with available data.", symbol, current_count)
+                            blb.push(bot.name, "WARN", f"Data stalled at {current_count} candles for {symbol}, proceeding")
                             break
                     else:
                         stagnant_checks = 0
@@ -336,6 +343,7 @@ class BotManager:
 
                 if df.empty or len(df) < 50:
                     logger.info("Skipping backfill for %s: insufficient data (%d candles, minimum 50 required).", symbol, len(df))
+                    blb.push(bot.name, "WARN", f"Skipping {symbol}: only {len(df)} candles, need 50+")
                     continue
 
                 df = df.sort_values('timestamp').reset_index(drop=True)
@@ -494,9 +502,11 @@ class BotManager:
                 if new_signals: db.bulk_save_objects(new_signals)
                 db.commit()
                 logger.info("Backfill complete: '%s' on %s | mode=%s | lookback=%d", bot.name, symbol, live_mode.upper(), lookback_limit)
+                blb.push(bot.name, "INFO", f"Backfill complete: {symbol} | mode={live_mode.upper()} | {lookback_limit} candles")
 
         except Exception as e:
             logger.error("Backfill Error: %s", e, exc_info=True)
+            blb.push(_log_name, "ERROR", f"Backfill error: {e}")
             db.rollback()
         finally:
             db.close()
@@ -556,6 +566,7 @@ class BotManager:
                                     max_dd = max(max_dd, dd)
                             if max_dd >= max_drawdown_pct:
                                 logger.warning("Bot '%s' hit max drawdown (%.2f%% >= %.2f%%), auto-stopping", bot.name, max_dd, max_drawdown_pct)
+                                blb.push(bot.name, "WARN", f"Max drawdown hit ({max_dd:.2f}% >= {max_drawdown_pct:.2f}%), auto-stopping")
                                 bot.is_active = False
                                 db.commit()
                                 continue
@@ -591,6 +602,7 @@ class BotManager:
                             mode = "paper" if api_key_record.is_sandbox else "live"
                         else:
                             logger.warning("Bot '%s': api_key_name='%s' not found. Running as forward_test.", bot.name, bot.settings.get("api_key_name"))
+                            blb.push(bot.name, "WARN", f"API key '{bot.settings.get('api_key_name')}' not found, running as forward_test")
 
                     # Cache exchange instance per bot cycle to avoid repeated connections
                     _cached_exchange = None
@@ -682,12 +694,15 @@ class BotManager:
 
                                 db.add(Order(position_id=open_position.id, exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=actual_price, amount=trade_amount, timestamp=latest_time, exchange_order_id=order_id, status="filled", fee=buy_fee))
                                 logger.info("%s BUY Filled @ %s", mode.upper(), actual_price)
+                                blb.push(bot.name, "INFO", f"{mode.upper()} BUY {symbol} @ {actual_price}")
 
                             except ccxt.InsufficientFunds as e:
                                 logger.warning("%s BUY rejected (insufficient funds): %s", mode.upper(), e)
+                                blb.push(bot.name, "WARN", f"{mode.upper()} BUY rejected: insufficient funds")
                                 db.add(Order(exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="rejected"))
                             except Exception as e:
                                 logger.error("%s BUY failed: %s", mode.upper(), e, exc_info=True)
+                                blb.push(bot.name, "ERROR", f"{mode.upper()} BUY failed: {e}")
                                 db.add(Order(exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="canceled"))
 
                     active_positions = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.status == "open", Position.mode == mode).all()
@@ -765,8 +780,10 @@ class BotManager:
                                     pos.amount -= close_qty
 
                                 logger.info("%s SELL (%s) Filled @ %s", mode.upper(), ev['reason'], actual_price)
+                                blb.push(bot.name, "INFO", f"{mode.upper()} SELL [{ev['reason']}] {symbol} @ {actual_price}")
                             except Exception as e:
                                 logger.error("%s SELL failed: %s", mode.upper(), e, exc_info=True)
+                                blb.push(bot.name, "ERROR", f"{mode.upper()} SELL failed: {e}")
                                 db.add(Order(position_id=pos.id, exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="sell", order_type="market", price=current_price, amount=close_qty, timestamp=latest_time, status="rejected"))
 
                     standard_cols = ['id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr']
