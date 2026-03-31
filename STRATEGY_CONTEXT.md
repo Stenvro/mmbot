@@ -41,8 +41,9 @@ The flow is always: **Indicator/Price Data --> Condition --> Logic Gate (optiona
 - Lookback period (number of candles)
 
 **Exchange Routing**
-- Select API key for paper (sandbox) or live execution
-- "No key selected" = forward test (local simulation, no API calls)
+- If an API key is selected: the exchange is automatically derived from the key (shown as a read-only badge). The key determines whether the bot runs in sandbox (paper) or live mode.
+- If no API key is selected: a **Data Exchange** dropdown appears, letting you manually select which exchange provides market data. The bot runs in forward-test mode (local simulation, no API calls).
+- Supported exchanges: OKX, Binance, Bitvavo, Coinbase, Crypto.com, Kraken, KuCoin
 
 ---
 
@@ -247,7 +248,9 @@ EXIT SIDE:
 7. **Strategy-based exits are optional** — if you only use TP/SL, you don't need a SELL action node
 8. **TP and SL nodes connect to the BUY action** (the entry), not to sell actions
 9. **Backtest node is optional** — without it, the bot only trades live candles
-10. **API key node is optional** — without it, the bot runs in forward-test mode (local simulation)
+10. **Exchange Routing node is optional** — without it, the bot runs in forward-test mode (local simulation)
+11. **If an API key is selected in the Exchange Routing node**, the exchange and sandbox/live mode are derived automatically from that key. Do not specify the exchange separately.
+12. **If no API key is selected**, choose a Data Exchange from the dropdown for market data. The bot will not place real orders.
 
 ---
 
@@ -273,3 +276,4 @@ The AI should respond with:
 - **State the market type** — trending, ranging, or volatile markets need different approaches
 - **Ask for multiple timeframe confirmation** — e.g. "only enter if the 1h trend is up" (requires multiple bots or manual confirmation, since each bot uses one timeframe)
 - **Request the exact wiring** — ask the AI to describe which node connects to which input (left/right, in1/in2, logic/tp/sl)
+- **Specify the exchange** — if not using an API key, mention which exchange to pull data from (OKX, Binance, Kraken, etc.)

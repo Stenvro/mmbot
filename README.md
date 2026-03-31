@@ -8,7 +8,7 @@
 ![CCXT](https://img.shields.io/badge/CCXT-Integrated-orange?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Alpha-yellow?style=for-the-badge)
 
-ApexAlgo is a full-stack algorithmic trading platform for building, backtesting, and executing systematic trading strategies — without writing code. A node-based visual strategy builder connects directly to a high-performance async execution engine with multi-exchange market data and encrypted exchange key management.
+ApexAlgo is a full-stack algorithmic trading platform for building, backtesting, and executing systematic trading strategies — without writing code. A node-based visual strategy builder connects directly to a high-performance async execution engine with multi-exchange market data, encrypted exchange key management, and real-time per-bot console output.
 
 > **Alpha release — not production-ready.** APIs and data schemas may change between versions.
 
@@ -19,7 +19,7 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 ### Strategy Builder
 - **Visual Node Editor** — drag-and-drop canvas with 51+ technical indicators, logic gates, conditions, and action nodes
 - **No-Code Strategy Design** — connect indicator, condition, and logic nodes to build complex entry/exit rules
-- **Exchange Routing Node** — select an API key (auto-derives exchange) or manually pick a data exchange when running without a key
+- **Exchange Routing Node** — select an API key (exchange auto-derived from the key) or manually pick a data exchange when running without a key
 - **ReactFlow Graph Serialization** — strategies are compiled to JSON and evaluated per candle
 
 ### Execution Engine
@@ -32,7 +32,14 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **7 Exchanges out of the box** — OKX, Binance, Bitvavo, Coinbase, Crypto.com, Kraken, KuCoin
 - **Isolated data streams** — bots on different exchanges poll independently and store candles separately; no cross-exchange data mixing
 - **Exchange Registry** — centralized `exchange_registry.py` handles per-exchange config (OKX EU hostname, passphrase exchanges, sandbox modes)
-- **Automatic migration** — existing databases are upgraded non-destructively on startup; all historical OKX data is preserved
+- **Automatic migration** — existing databases are upgraded non-destructively on startup; all historical data is preserved
+
+### Bot Management
+- **Live Bot Console** — each bot card has an expandable scrollable console showing real-time engine events (backfill progress, BUY/SELL fills, errors, max drawdown triggers). Persisted in a `bot_logs` table — survives backend restarts
+- **Export to File** — save any bot's strategy and settings to a portable `.apex.json` file
+- **Import from File** — restore a bot from a previously exported file; name collisions are resolved automatically
+- **Duplicate Bot** — clone a bot's configuration without copying its trade history or signal cache
+- **Cache Wipe** — clears chart signals and resets the bot's log buffer in one operation
 
 ### Backtesting
 - **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods
@@ -60,6 +67,10 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **Environment Isolation** — secrets auto-generated during setup, never committed
 
 ### Analytics
+- **Equity Curve** — inline SVG cumulative P&L chart over time (no external chart library)
+- **Buy & Hold Comparison** — per-symbol strategy return vs. passive buy-and-hold using live price polling
+- **8-Metric Stats Strip** — Net P&L, Win Rate, Profit Factor, Max Drawdown, Total Trades, Avg Hold Time, Total Fees, Return/Risk ratio
+- **Exchange Filter** — filter all analytics sections by exchange, bot, symbol, or execution mode
 - **Real-Time Charts** — TradingView lightweight-charts with indicator overlays on correct axis scales
 - **Position & Order Tracking** — detailed P&L, fee tracking, and trade history
 - **Signal Recording** — every entry/exit signal stored with indicator snapshot values
@@ -153,34 +164,44 @@ screen -r apex_frontend   # attach to frontend
 ApexAlgo/
 ├── backend/
 │   ├── core/
-│   │   ├── database.py        # SQLAlchemy engine, session, idempotent migrations
+│   │   ├── database.py            # SQLAlchemy engine, session, idempotent migrations
 │   │   ├── exchange_registry.py   # CCXT exchange factory for all supported exchanges
-│   │   ├── encryption.py      # Fernet credential encryption/decryption
-│   │   ├── events.py          # Async event bus (CANDLE_CLOSED, BOT_STATE_CHANGED)
-│   │   └── security.py        # API key authentication
+│   │   ├── bot_log_buffer.py      # Thin wrapper: push/get/clear bot logs in DB
+│   │   ├── encryption.py          # Fernet credential encryption/decryption
+│   │   ├── events.py              # Async event bus (CANDLE_CLOSED, BOT_STATE_CHANGED)
+│   │   └── security.py            # API key authentication
 │   ├── engine/
-│   │   ├── bot_manager.py     # core trading engine: backfill, live processing, order execution
-│   │   ├── candle_poller.py   # universal multi-exchange REST polling (replaces OKX WebSocket)
-│   │   ├── evaluator.py       # node graph resolver using pandas_ta
-│   │   └── settings_validator.py  # bot settings integrity checks
-│   ├── models/                # SQLAlchemy ORM (BotConfig, Position, Order, Signal, Candle, ExchangeKey)
-│   ├── routers/               # API route handlers (bots, trades, data, keys)
-│   └── main.py                # app init, CORS, lifespan, migrations
+│   │   ├── bot_manager.py         # Core trading engine: backfill, live processing, order execution
+│   │   ├── candle_poller.py       # Universal multi-exchange REST polling
+│   │   ├── evaluator.py           # Node graph resolver using pandas_ta
+│   │   └── settings_validator.py  # Bot settings integrity checks
+│   ├── models/
+│   │   ├── bots.py                # BotConfig ORM
+│   │   ├── bot_logs.py            # BotLog ORM — per-bot engine event log (persisted)
+│   │   ├── positions.py           # Position ORM
+│   │   ├── orders.py              # Order ORM
+│   │   ├── signals.py             # Signal ORM
+│   │   ├── candles.py             # Candle ORM (exchange-isolated)
+│   │   └── exchange_keys.py       # ExchangeKey ORM
+│   ├── routers/                   # API route handlers (bots, trades, data, keys)
+│   └── main.py                    # App init, CORS, lifespan, migrations
 ├── frontend/
 │   └── src/
-│       ├── api/               # axios client with auth interceptor
+│       ├── api/                   # Axios client with auth interceptor
 │       └── components/
-│           ├── Builder/           # visual strategy editor (BotBuilder, CustomNodes, indicatorConfig)
+│           ├── Builder/           # Visual strategy editor (BotBuilder, CustomNodes, indicatorConfig)
 │           ├── ChartEngine.jsx    # TradingView charts with indicator overlays
-│           ├── BotManagerUI.jsx   # bot list, start/stop controls
-│           ├── DataManager.jsx    # historical data download and management (multi-exchange)
-│           ├── TradeManager.jsx   # position/order analytics, P&L tracking
-│           └── Settings.jsx       # exchange key management (multi-exchange)
+│           ├── BotManagerUI.jsx   # Bot cards: start/stop, console, export/import/duplicate
+│           ├── BotConsole.jsx     # Per-bot live log console (polling, auto-scroll, level colors)
+│           ├── DataManager.jsx    # Historical data download and management (multi-exchange)
+│           ├── TradeManager.jsx   # Quant analytics: equity curve, buy & hold, 8-metric stats
+│           └── Settings.jsx       # Exchange key management (multi-exchange)
 ├── data/                  # SQLite database (gitignored)
 ├── .cert/                 # TLS certificates (gitignored)
 ├── requirements.txt
-├── Setup.sh / Setup.ps1           # one-command setup (Linux / Windows)
-└── Start_ApexAlgo.sh / .ps1       # one-command start (Linux / Windows)
+├── STRATEGY_CONTEXT.md    # AI prompt context for the visual strategy builder
+├── Setup.sh / Setup.ps1           # One-command setup (Linux / Windows)
+└── Start_ApexAlgo.sh / .ps1       # One-command start (Linux / Windows)
 ```
 
 ---
@@ -204,15 +225,69 @@ Strategy Builder (ReactFlow) ──serialize──> Bot Settings JSON
                                      NodeEvaluator resolves indicator → condition → logic
                                                 │
                                      BotManager processes entries/exits
-                                                │
-                          ┌─────────────────────┼─────────────────────┐
-                    Forward Test           Paper (Sandbox)          Live Exchange
-                   (local simulation)   (exchange sandbox API)   (exchange production)
+                                          │                  │
+                                  bot_log_buffer          Exchange API
+                                  (DB-persisted)       (CCXT paper/live)
+                                          │
+                          ┌───────────────┼──────────────────┐
+                    Forward Test      Paper (Sandbox)      Live Exchange
+                   (local simulation) (exchange sandbox)  (exchange production)
                                                 │
                                      Position + Order + Signal ──> DB
                                                 │
-                                     ChartEngine + TradeManager ──> UI
+                            ┌───────────────────┴───────────────────┐
+                     ChartEngine                              TradeManager
+                  (TradingView signals)            (equity curve, buy & hold, stats)
+                                                │
+                                         BotManagerUI
+                                    (live console via /logs polling)
 ```
+
+---
+
+## Bot Log Console
+
+Each bot card in the Bot Manager has an expandable console panel. It streams the bot's engine output in real time by polling `GET /api/bots/{name}/logs?since={seq}` every 2 seconds while the panel is open — zero overhead when closed.
+
+Logs are written to the `bot_logs` SQLite table by `bot_manager.py` at key execution points:
+
+| Event | Level |
+| :--- | :--- |
+| Waiting for candle data / data ready / data stalled | INFO / WARN |
+| Backfill complete or error | INFO / ERROR |
+| BUY filled / rejected / failed | INFO / WARN / ERROR |
+| SELL filled / failed | INFO / ERROR |
+| Max drawdown auto-stop | WARN |
+| API key not found, falling back to forward_test | WARN |
+| General strategy execution error | ERROR |
+
+Log entries persist across backend restarts. Wiping the cache also clears the log buffer for that bot.
+
+---
+
+## Bot Export / Import / Duplicate
+
+### Export
+Click **Export** on any bot card to download a `.apex.json` file containing the bot's name, strategy graph, settings, and sandbox flag. Trade history and signals are not included.
+
+```json
+{
+  "apex_version": "1.0",
+  "exported_at": "2026-03-31T14:07:33Z",
+  "bot": {
+    "name": "My Strategy",
+    "is_sandbox": true,
+    "strategy": "<ReactFlow graph JSON>",
+    "settings": { "timeframe": "1h", "symbols": ["BTC/USDT"], ... }
+  }
+}
+```
+
+### Import
+Click **Import Bot** in the page header and select a `.apex.json` file. If the bot name already exists, `(imported)` is appended automatically.
+
+### Duplicate
+Click **Duplicate** on any stopped bot card to create a clone with `(copy)` appended to the name. The duplicate starts inactive with no trade history.
 
 ---
 
