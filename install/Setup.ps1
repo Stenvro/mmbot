@@ -14,7 +14,7 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ROOT = $PSScriptRoot
+$ROOT = Split-Path -Parent $PSScriptRoot
 
 Write-Host "ApexAlgo Setup"
 Write-Host "--------------------------------"

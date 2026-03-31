@@ -6,6 +6,7 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![CCXT](https://img.shields.io/badge/CCXT-Integrated-orange?style=for-the-badge)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Alpha-yellow?style=for-the-badge)
 
 ApexAlgo is a full-stack algorithmic trading platform for building, backtesting, and executing systematic trading strategies — without writing code. A node-based visual strategy builder connects directly to a high-performance async execution engine with multi-exchange market data, encrypted exchange key management, and real-time per-bot console output.
@@ -63,7 +64,7 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 ### Security
 - **Fernet Encryption** — exchange API credentials encrypted at rest
 - **Timing-Safe Authentication** — all endpoints require `X-API-Key` with HMAC-based comparison
-- **Local TLS** — mkcert-generated trusted development certificates
+- **Local TLS** — self-signed or mkcert-generated trusted certificates
 - **Environment Isolation** — secrets auto-generated during setup, never committed
 
 ### Analytics
@@ -78,7 +79,77 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ---
 
-## Requirements
+## Quick Start (Docker)
+
+> Requires only [Docker Desktop](https://docs.docker.com/get-docker/). No Python, Node, or manual setup.
+
+```bash
+git clone https://github.com/Stenvro/ApexAlgo.git
+cd ApexAlgo
+docker compose up -d
+```
+
+First start takes ~2 minutes (builds images + compiles frontend). Subsequent starts are instant.
+
+| Service | URL |
+| :--- | :--- |
+| Frontend | `https://localhost:5173` |
+| Backend API | `https://localhost:8000` |
+| API Docs (Swagger) | `https://localhost:8000/docs` |
+
+> Accept the self-signed certificate warning in your browser on first visit.
+
+### Managing ApexAlgo
+
+| Command | Description |
+| :--- | :--- |
+| `docker compose up -d` | Start (detached) |
+| `docker compose down` | Stop |
+| `docker compose logs -f` | View all logs |
+| `docker compose logs -f backend` | Backend logs only |
+| `docker compose logs -f frontend` | Frontend logs only |
+| `docker compose up -d --build` | Rebuild images (after pulling new code) |
+
+### Custom LAN Access
+
+To access ApexAlgo from another device on your network:
+
+```bash
+VITE_API_BASE_URL=https://YOUR-IP:8000 docker compose up -d --build
+```
+
+This rebuilds the frontend with the correct API URL.
+
+### Data Persistence
+
+All data is stored in a Docker volume (`apexalgo-data`):
+- Database, encryption keys, API keys, SSL certificates
+
+| Command | Effect |
+| :--- | :--- |
+| `docker compose down` | Stops containers — **data preserved** |
+| `docker compose down -v` | Stops containers — **data destroyed** |
+
+### Migrate Existing Data into Docker
+
+If you have an existing non-Docker setup with data:
+
+```bash
+docker run --rm -v apexalgo-data:/data -v $(pwd):/host alpine sh -c "
+  cp /host/data/ApexAlgoDB.sqlite3 /data/
+  cp /host/.env /data/.env
+  mkdir -p /data/cert
+  cp /host/.cert/*.pem /data/cert/
+  echo Done"
+```
+
+---
+
+## Manual Installation (without Docker)
+
+Legacy setup scripts are available in the `install/` folder for running ApexAlgo directly on the host machine.
+
+### Requirements
 
 | Dependency | Version | Notes |
 | :--- | :--- | :--- |
@@ -87,66 +158,17 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 | mkcert | latest | Installed automatically |
 | screen | any | Linux only |
 
----
-
-## Setup and Start
-
-Both setup scripts handle everything in one run: install dependencies, create the Python virtual environment, install packages, generate trusted SSL certificates via mkcert, and create a `.env` file with **auto-generated secure keys**.
-
-After setup, only one value in `.env` may need editing:
-
-```env
-VITE_API_BASE_URL=https://<your-ip>:8000
-```
-
-This is pre-filled with your detected LAN IP. Change it if you access ApexAlgo from a different host or network.
-
 ### Linux — Ubuntu / Debian / Arch / Raspberry Pi
 
 ```bash
 git clone https://github.com/Stenvro/ApexAlgo.git
 cd ApexAlgo
-chmod +x Setup.sh Start_ApexAlgo.sh
-./Setup.sh
-./Start_ApexAlgo.sh
+chmod +x install/Setup.sh install/Start_ApexAlgo.sh
+bash install/Setup.sh
+bash install/Start_ApexAlgo.sh
 ```
 
-Services run in detached `screen` sessions (see [Managing Screen Sessions](#managing-screen-sessions) below).
-
-To regenerate SSL certificates, delete `.cert/cert.pem` and `.cert/key.pem` and re-run `./Setup.sh`.
-
-### Windows — PowerShell
-
-```powershell
-git clone https://github.com/Stenvro/ApexAlgo.git
-cd ApexAlgo
-powershell -ExecutionPolicy Bypass -File .\Setup.ps1
-.\Start_ApexAlgo.ps1
-```
-
-`Setup.ps1` uses **winget** to install Python, Node.js, and mkcert if they are not already present.
-
-`Start_ApexAlgo.ps1` opens two separate PowerShell windows — one for the backend, one for the frontend. Close a window to stop that service.
-
-To regenerate SSL certificates, delete `.cert\cert.pem` and `.cert\key.pem` and re-run `.\Setup.ps1`.
-
----
-
-## Access
-
-| Service | URL |
-| :--- | :--- |
-| Backend API | `https://localhost:8000` |
-| Frontend | `https://localhost:5173` |
-| API Docs (Swagger) | `https://localhost:8000/docs` |
-
----
-
-## Managing Screen Sessions
-
-> Linux only. Windows uses separate PowerShell windows instead.
-
-ApexAlgo runs in detached `screen` sessions.
+Services run in detached `screen` sessions:
 
 ```bash
 screen -r apex_backend    # attach to backend
@@ -155,6 +177,35 @@ screen -r apex_frontend   # attach to frontend
 
 - **Detach** (keep running): `Ctrl+A` then `D`
 - **Stop process**: `Ctrl+C`
+
+### Windows — PowerShell
+
+```powershell
+git clone https://github.com/Stenvro/ApexAlgo.git
+cd ApexAlgo
+powershell -ExecutionPolicy Bypass -File .\install\Setup.ps1
+.\install\Start_ApexAlgo.ps1
+```
+
+`Setup.ps1` uses **winget** to install Python, Node.js, and mkcert if they are not already present. `Start_ApexAlgo.ps1` opens two separate PowerShell windows — one for the backend, one for the frontend.
+
+### Environment Variables
+
+Both setup methods (Docker and manual) auto-generate a `.env` file with secure keys on first run. The only value you may need to edit:
+
+```env
+VITE_API_BASE_URL=https://<your-ip>:8000
+```
+
+This is pre-filled with your detected LAN IP (manual) or `localhost` (Docker). Change it if you access ApexAlgo from a different host.
+
+| Variable | Description | Auto-generated |
+| :--- | :--- | :--- |
+| `MASTER_API_KEY` | Backend authentication key for all API requests | Yes |
+| `DATABASE_URL` | SQLAlchemy database connection string | Yes |
+| `ENCRYPTION_KEY` | Fernet key used to encrypt exchange API credentials at rest | Yes |
+| `VITE_API_BASE_URL` | Backend base URL used by the frontend | Yes — verify if needed |
+| `VITE_API_KEY` | API key sent by the frontend on every request | Yes |
 
 ---
 
@@ -196,12 +247,20 @@ ApexAlgo/
 │           ├── DataManager.jsx    # Historical data download and management (multi-exchange)
 │           ├── TradeManager.jsx   # Quant analytics: equity curve, buy & hold, 8-metric stats
 │           └── Settings.jsx       # Exchange key management (multi-exchange)
-├── data/                  # SQLite database (gitignored)
-├── .cert/                 # TLS certificates (gitignored)
+├── docker/
+│   ├── backend.Dockerfile         # Python 3.11 + FastAPI + uvicorn
+│   ├── frontend.Dockerfile        # nginx + Node.js (builds frontend at startup)
+│   ├── backend-entrypoint.sh      # Auto-generates .env + SSL certs, starts uvicorn
+│   ├── frontend-entrypoint.sh     # Waits for .env, builds frontend, starts nginx
+│   └── nginx.conf                 # SPA fallback + SSL on port 5173
+├── install/
+│   ├── Setup.sh / Setup.ps1              # Legacy setup (Linux / Windows)
+│   └── Start_ApexAlgo.sh / .ps1          # Legacy start (Linux / Windows)
+├── docker-compose.yml             # Two services: backend + frontend
+├── data/                          # SQLite database (gitignored)
+├── .cert/                         # TLS certificates (gitignored)
 ├── requirements.txt
-├── STRATEGY_CONTEXT.md    # AI prompt context for the visual strategy builder
-├── Setup.sh / Setup.ps1           # One-command setup (Linux / Windows)
-└── Start_ApexAlgo.sh / .ps1       # One-command start (Linux / Windows)
+└── STRATEGY_CONTEXT.md            # AI prompt context for the visual strategy builder
 ```
 
 ---
@@ -278,7 +337,7 @@ Click **Export** on any bot card to download a `.apex.json` file containing the 
     "name": "My Strategy",
     "is_sandbox": true,
     "strategy": "<ReactFlow graph JSON>",
-    "settings": { "timeframe": "1h", "symbols": ["BTC/USDT"], ... }
+    "settings": { "timeframe": "1h", "symbols": ["BTC/USDT"] }
   }
 }
 ```
@@ -307,23 +366,11 @@ Adding support for any other CCXT-compatible exchange requires only adding it to
 
 ---
 
-## Environment Variables
-
-| Variable | Description | Auto-generated |
-| :--- | :--- | :--- |
-| `MASTER_API_KEY` | Backend authentication key for all API requests | Yes |
-| `DATABASE_URL` | SQLAlchemy database connection string | Yes |
-| `ENCRYPTION_KEY` | Fernet key used to encrypt exchange API credentials at rest | Yes |
-| `VITE_API_BASE_URL` | Backend base URL used by the frontend | Yes — verify if needed |
-| `VITE_API_KEY` | API key sent by the frontend on every request | Yes |
-
----
-
 ## Security
 
 - Exchange API keys are encrypted at rest using Fernet symmetric encryption
 - All API endpoints require a bearer token (`X-API-Key` header) with timing-safe comparison
-- TLS certificates are generated locally via mkcert; `.cert/` is excluded from version control
+- TLS certificates are generated automatically (self-signed in Docker, mkcert in manual setup)
 - `.env` is excluded from version control; secrets are auto-generated during setup
 - Live order execution includes max order value safety guards
 - Order fill status is validated after every exchange API call

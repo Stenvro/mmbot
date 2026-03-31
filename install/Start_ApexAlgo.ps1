@@ -13,7 +13,7 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$ROOT = $PSScriptRoot
+$ROOT = Split-Path -Parent $PSScriptRoot
 
 ########################################
 # Pre-flight checks

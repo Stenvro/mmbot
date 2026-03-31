@@ -1,0 +1,14 @@
+.git
+.cert
+.env
+.env.*
+data/
+apexalgo_venv/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+*.sqlite3
+*.db
+.claude/
+install/

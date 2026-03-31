@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 VENV_DIR="apexalgo_venv"
@@ -359,7 +359,7 @@ EOF
 fi
 
 mkdir -p data
-chmod +x Start_ApexAlgo.sh
+chmod +x install/Start_ApexAlgo.sh
 
 ########################################
 # Done
@@ -369,8 +369,8 @@ echo ""
 echo "--------------------------------"
 echo "Setup complete."
 echo ""
-echo "Next step:  ./Start_ApexAlgo.sh"
+echo "Next step:  bash install/Start_ApexAlgo.sh"
 echo ""
 echo "To regenerate SSL certificates:"
-echo "  Delete .cert/cert.pem and .cert/key.pem, then re-run bash Setup.sh"
+echo "  Delete .cert/cert.pem and .cert/key.pem, then re-run bash install/Setup.sh"
 echo "--------------------------------"
