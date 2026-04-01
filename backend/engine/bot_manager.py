@@ -416,10 +416,10 @@ class BotManager:
                             trade_entry_indices.append(index)
                             original_amount = trade_amount
                             bt_entry_price = current_price * (1 + bt_entry_slippage)
-                            open_bt_pos = Position(exchange=exchange_name, bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=bt_entry_price, amount=trade_amount)
+                            open_bt_pos = Position(exchange=exchange_name, bot_name=bot.name, symbol=symbol, mode="backtest", status="open", side="long", entry_price=bt_entry_price, amount=trade_amount, created_at=ts)
                             db.add(open_bt_pos)
                             db.flush()
-                            db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=bt_entry_price, amount=trade_amount, timestamp=ts, status="filled"))
+                            db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="buy", order_type="market", price=bt_entry_price, amount=trade_amount, timestamp=ts, status="filled", fee=bt_entry_price * trade_amount * bt_entry_fee))
                             just_opened_this_tick = True
 
                         elif open_bt_pos and not just_opened_this_tick:
@@ -436,7 +436,7 @@ class BotManager:
                                 if close_qty <= 0: continue
 
                                 actual_price = ev['price'] * (1 - bt_exit_slippage)
-                                db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled"))
+                                db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=actual_price, amount=close_qty, timestamp=ts, status="filled", fee=actual_price * close_qty * bt_exit_fee))
 
                                 entry_cost = open_bt_pos.entry_price * close_qty * (1 + bt_entry_fee)
                                 exit_proceeds = actual_price * close_qty * (1 - bt_exit_fee)
@@ -492,7 +492,7 @@ class BotManager:
 
                         open_bt_pos.status = "closed"
                         open_bt_pos.closed_at = last_ts
-                        db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=last_price, amount=remaining_qty, timestamp=last_ts, status="filled"))
+                        db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=last_price, amount=remaining_qty, timestamp=last_ts, status="filled", fee=last_price * remaining_qty * bt_exit_fee))
 
                         if open_bt_pos.id in self.position_states:
                             del self.position_states[open_bt_pos.id]

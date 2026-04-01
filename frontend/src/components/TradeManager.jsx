@@ -276,6 +276,19 @@ export default function TradeManager({ setError }) {
     const uniqueSymbols = useMemo(() => [...new Set([...positions, ...orders].map(x => x.symbol).filter(Boolean))], [positions, orders]);
     const uniqueExchanges = useMemo(() => [...new Set([...positions, ...orders].map(x => x.exchange || 'okx').filter(Boolean))], [positions, orders]);
 
+    // ── Entry order timestamp lookup (shared by stats + ledger rows) ──────────
+
+    const entryTsByPos = useMemo(() => {
+        const map = {};
+        for (const o of orders) {
+            if (o.side === 'buy' && o.status === 'filled' && o.position_id && o.timestamp) {
+                const t = new Date(o.timestamp);
+                if (!map[o.position_id] || t < map[o.position_id]) map[o.position_id] = t;
+            }
+        }
+        return map;
+    }, [orders]);
+
     // ── Stats ─────────────────────────────────────────────────────────────────
 
     const stats = useMemo(() => {
@@ -287,19 +300,31 @@ export default function TradeManager({ setError }) {
         const winRate = closedPositions.length > 0 ? (wins.length / closedPositions.length) * 100 : 0;
         const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? 999 : 0);
 
-        // Max drawdown from equity curve
+        // Max drawdown — absolute dollars so it's always meaningful even when the
+        // equity curve never goes significantly positive (e.g. a bear-market backtest)
         const sorted = [...closedPositions].sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
         let equity = 0, peak = 0, maxDD = 0;
         for (const p of sorted) {
             equity += (p.profit_abs || 0);
             if (equity > peak) peak = equity;
-            if (peak > 0) maxDD = Math.max(maxDD, ((peak - equity) / peak) * 100);
+            maxDD = Math.max(maxDD, peak - equity);
         }
 
-        // Avg hold time
-        const withTimes = closedPositions.filter(p => p.created_at && p.closed_at);
-        const avgHoldMs = withTimes.length > 0
-            ? withTimes.reduce((s, p) => s + (new Date(p.closed_at) - new Date(p.created_at)), 0) / withTimes.length
+        // Avg hold time — use entry order timestamps as fallback for backtest positions
+        // whose created_at may be the wall-clock run time, not the candle entry time
+        const holdTimes = closedPositions.map(p => {
+            if (!p.closed_at) return null;
+            const closedTs = new Date(p.closed_at);
+            if (p.created_at) {
+                const createdTs = new Date(p.created_at);
+                if (closedTs > createdTs) return closedTs - createdTs;
+            }
+            const entryTs = entryTsByPos[p.id];
+            if (entryTs && closedTs > entryTs) return closedTs - entryTs;
+            return null;
+        }).filter(t => t !== null);
+        const avgHoldMs = holdTimes.length > 0
+            ? holdTimes.reduce((s, t) => s + t, 0) / holdTimes.length
             : 0;
 
         // Return/Risk (simplified Sharpe)
@@ -330,7 +355,7 @@ export default function TradeManager({ setError }) {
             avgWin: wins.length > 0 ? grossProfit / wins.length : 0,
             avgLoss: losses.length > 0 ? grossLoss / losses.length : 0,
         };
-    }, [closedPositions, orders]);
+    }, [closedPositions, orders, entryTsByPos]);
 
     // ── Equity curve data ─────────────────────────────────────────────────────
 
@@ -344,7 +369,10 @@ export default function TradeManager({ setError }) {
 
     const buyAndHoldData = useMemo(() => {
         const bySymbol = {};
-        for (const p of closedPositions) {
+        // Scan ALL filtered positions (open + closed) so the reference entry price
+        // reflects the true first entry even when that position is still open
+        for (const p of [...activePositions, ...closedPositions]) {
+            if (!p.symbol || !p.created_at || !p.entry_price) continue;
             if (!bySymbol[p.symbol]) {
                 bySymbol[p.symbol] = { firstDate: new Date(p.created_at), firstPrice: p.entry_price, positions: [] };
             }
@@ -353,20 +381,28 @@ export default function TradeManager({ setError }) {
                 s.firstDate = new Date(p.created_at);
                 s.firstPrice = p.entry_price;
             }
-            s.positions.push(p);
         }
-        return Object.entries(bySymbol).map(([symbol, d]) => {
-            const totalInvested = d.positions.reduce((s, p) => s + (p.entry_price * p.amount), 0);
-            const strategyPnl = d.positions.reduce((s, p) => s + (p.profit_abs || 0), 0);
-            const strategyPct = totalInvested > 0 ? (strategyPnl / totalInvested) * 100 : 0;
-            const curPrice = livePrices[symbol];
-            const bhPct = (curPrice && d.firstPrice > 0)
-                ? ((curPrice - d.firstPrice) / d.firstPrice) * 100
-                : null;
-            const edge = bhPct !== null ? strategyPct - bhPct : null;
-            return { symbol, strategyPct, bhPct, edge, totalInvested, strategyPnl };
-        });
-    }, [closedPositions, livePrices]);
+        // Strategy P&L only from closed positions
+        for (const p of closedPositions) {
+            if (bySymbol[p.symbol]) bySymbol[p.symbol].positions.push(p);
+        }
+        return Object.entries(bySymbol)
+            .filter(([, d]) => d.positions.length > 0)
+            .map(([symbol, d]) => {
+                const strategyPnl = d.positions.reduce((s, p) => s + (p.profit_abs || 0), 0);
+                // Sum per-trade returns so the denominator is per-dollar-deployed per trade,
+                // making it comparable to B&H which also measures return on a single deployed sum.
+                // Dividing by totalInvested (sum of all position values) would dilute the result
+                // proportionally to trade count, producing near-zero % for active strategies.
+                const strategyPct = d.positions.reduce((s, p) => s + (p.profit_pct || 0), 0);
+                const curPrice = livePrices[symbol];
+                const bhPct = (curPrice && d.firstPrice > 0)
+                    ? ((curPrice - d.firstPrice) / d.firstPrice) * 100
+                    : null;
+                const edge = bhPct !== null ? strategyPct - bhPct : null;
+                return { symbol, strategyPct, bhPct, edge, totalInvested, strategyPnl };
+            });
+    }, [closedPositions, activePositions, livePrices]);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -507,7 +543,7 @@ export default function TradeManager({ setError }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <Stat
                     label="Net PNL"
-                    value={`${pnlSign(stats.netPnl)}$${safeNum(Math.abs(stats.netPnl))}`}
+                    value={`${stats.netPnl >= 0 ? '+' : '-'}$${safeNum(Math.abs(stats.netPnl))}`}
                     sub={`${stats.wins}W / ${stats.losses}L`}
                     accent={stats.netPnl >= 0 ? 'green' : 'red'}
                     border={stats.netPnl >= 0 ? '#2ebd85' : '#f6465d'}
@@ -528,10 +564,10 @@ export default function TradeManager({ setError }) {
                 />
                 <Stat
                     label="Max Drawdown"
-                    value={stats.total > 0 ? `-${safeNum(stats.maxDD, 2)}%` : '—'}
-                    sub="peak-to-trough"
-                    accent={stats.maxDD > 20 ? 'red' : 'white'}
-                    border={stats.maxDD > 20 ? '#f6465d' : '#202532'}
+                    value={stats.total > 0 ? `-$${safeNum(stats.maxDD)}` : '—'}
+                    sub="peak-to-trough equity"
+                    accent="red"
+                    border="#f6465d"
                 />
                 <Stat
                     label="Avg Win"
@@ -696,7 +732,7 @@ export default function TradeManager({ setError }) {
                                             <td className="px-4 py-3 text-right font-mono text-[#848e9c]">${safeNum(pos.entry_price)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-[#848e9c]">{formatCrypto(pos.amount)}</td>
                                             <td className={`px-4 py-3 text-right font-mono font-bold ${hasPrice ? pnlColor(pnl.abs) : 'text-[#848e9c]'}`}>
-                                                {hasPrice ? `${pnlSign(pnl.abs)}$${safeNum(Math.abs(pnl.abs))}` : '—'}
+                                                {hasPrice ? `${pnl.abs >= 0 ? '+' : '-'}$${safeNum(Math.abs(pnl.abs))}` : '—'}
                                             </td>
                                             <td className={`px-4 py-3 text-right font-mono font-bold ${hasPrice ? pnlColor(pnl.pct) : 'text-[#848e9c]'}`}>
                                                 {hasPrice ? `${pnlSign(pnl.pct)}${safeNum(pnl.pct, 2)}%` : '—'}
@@ -771,9 +807,16 @@ export default function TradeManager({ setError }) {
                                     {renderedPositions.map(pos => {
                                         const isWin = (pos.profit_abs || 0) >= 0;
                                         const exitPrice = getExitPrice(pos);
-                                        const holdMs = pos.closed_at && pos.created_at
-                                            ? new Date(pos.closed_at) - new Date(pos.created_at)
-                                            : 0;
+                                        const holdMs = (() => {
+                                            if (!pos.closed_at) return 0;
+                                            const closedTs = new Date(pos.closed_at);
+                                            if (pos.created_at) {
+                                                const d = closedTs - new Date(pos.created_at);
+                                                if (d > 0) return d;
+                                            }
+                                            const entryTs = entryTsByPos[pos.id];
+                                            return (entryTs && closedTs > entryTs) ? closedTs - entryTs : 0;
+                                        })();
                                         const posFees = orders
                                             .filter(o => o.position_id === pos.id)
                                             .reduce((s, o) => s + (o.fee || 0), 0);
@@ -803,7 +846,7 @@ export default function TradeManager({ setError }) {
                                                     </span>
                                                 </td>
                                                 <td className={`px-4 py-2.5 text-right font-mono font-bold ${pnlColor(pos.profit_abs)}`}>
-                                                    {pnlSign(pos.profit_abs)}${safeNum(Math.abs(pos.profit_abs))}
+                                                    {(pos.profit_abs || 0) >= 0 ? '+' : '-'}${safeNum(Math.abs(pos.profit_abs || 0))}
                                                 </td>
                                                 <td className="px-4 py-2.5 text-right font-mono text-[#848e9c] text-[10px]">
                                                     {posFees > 0 ? `-$${safeNum(posFees, 4)}` : '—'}

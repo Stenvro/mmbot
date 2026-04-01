@@ -44,7 +44,7 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ### Backtesting
 - **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods
-- **Fee-Adjusted P&L** — entry/exit fees and slippage applied to all profit calculations
+- **Fee-Adjusted P&L** — entry/exit fees and slippage applied to all profit calculations; computed fee amounts are stored on each Order record so the analytics page can report accurate total fees paid
 - **Automatic Position Closure** — open positions at backtest end are closed at last price with proper P&L
 
 ### Risk Management
@@ -69,11 +69,12 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ### Analytics
 - **Equity Curve** — inline SVG cumulative P&L chart over time (no external chart library)
-- **Buy & Hold Comparison** — per-symbol strategy return vs. passive buy-and-hold using live price polling
-- **8-Metric Stats Strip** — Net P&L, Win Rate, Profit Factor, Max Drawdown, Total Trades, Avg Hold Time, Total Fees, Return/Risk ratio
+- **Buy & Hold Comparison** — per-symbol strategy return vs. passive buy-and-hold; strategy % is the sum of per-trade returns (so the denominator is per-dollar-deployed per trade, not total capital rotated); reference price always anchored to the true first entry across all positions (open and closed)
+- **8-Metric Stats Strip** — Net P&L, Win Rate, Profit Factor, Max Drawdown (absolute dollars, peak-to-trough), Avg Hold Time, Total Fees, Return/Risk ratio
+- **Avg Hold Time** — computed from entry order timestamps as fallback for backtests where position `created_at` reflects wall-clock run time rather than the candle entry time
 - **Exchange Filter** — filter all analytics sections by exchange, bot, symbol, or execution mode
 - **Real-Time Charts** — TradingView lightweight-charts with indicator overlays on correct axis scales
-- **Position & Order Tracking** — detailed P&L, fee tracking, and trade history
+- **Position & Order Tracking** — detailed P&L with explicit +/- signs, fee tracking, and trade history
 - **Signal Recording** — every entry/exit signal stored with indicator snapshot values
 - **CSV Export** — download trade history for external analysis
 
@@ -89,7 +90,7 @@ cd ApexAlgo
 docker compose up -d
 ```
 
-First start takes ~2 minutes (builds images + compiles frontend). Subsequent starts are instant.
+First start takes ~2 minutes (builds images + compiles frontend). Subsequent starts are instant unless you need a full rebuild (see [Development Workflow](#development-workflow)).
 
 | Service | URL |
 | :--- | :--- |
@@ -109,7 +110,40 @@ First start takes ~2 minutes (builds images + compiles frontend). Subsequent sta
 | `docker compose logs -f` | View all logs |
 | `docker compose logs -f backend` | Backend logs only |
 | `docker compose logs -f frontend` | Frontend logs only |
-| `docker compose up -d --build` | Rebuild images (after pulling new code) |
+| `docker compose build && docker compose up -d` | Full rebuild (after pulling new code or changing Dockerfiles / dependencies) |
+
+---
+
+## Development Workflow
+
+Source code is bind-mounted into the running containers so you can iterate without rebuilding the Docker images:
+
+| Path | Mounted to | Effect |
+| :--- | :--- | :--- |
+| `./backend/` | `/app/backend/` | Live — uvicorn reloads automatically on save |
+| `./frontend/src/` | `/app/frontend/src/` | Requires a frontend rebuild trigger (see below) |
+
+### Backend changes
+
+Just save the file. Uvicorn runs with `--reload` and watches `/app/backend`. Changes take effect in ~1 second.
+
+### Frontend changes
+
+After saving any file under `frontend/src/`, trigger a Vite rebuild:
+
+```bash
+rm -f data/.frontend-env-hash && docker restart apexalgo-frontend-1
+```
+
+The rebuild takes ~10–15 seconds. nginx automatically serves the new bundle.
+
+### Full image rebuild
+
+Required when changing `package.json`, `requirements.txt`, Dockerfiles, or entrypoint scripts:
+
+```bash
+docker compose build && docker compose up -d
+```
 
 ### Custom LAN Access
 
@@ -249,13 +283,13 @@ ApexAlgo/
 ├── docker/
 │   ├── backend.Dockerfile         # Python 3.11 + FastAPI + uvicorn
 │   ├── frontend.Dockerfile        # nginx + Node.js (builds frontend at startup)
-│   ├── backend-entrypoint.sh      # Auto-generates .env + SSL certs, starts uvicorn
+│   ├── backend-entrypoint.sh      # Auto-generates .env + SSL certs, starts uvicorn --reload
 │   ├── frontend-entrypoint.sh     # Waits for .env, builds frontend, starts nginx
 │   └── nginx.conf                 # SPA fallback + SSL on port 5173
 ├── install/
 │   ├── Setup.sh / Setup.ps1              # Legacy setup (Linux / Windows)
 │   └── Start_ApexAlgo.sh / .ps1          # Legacy start (Linux / Windows)
-├── docker-compose.yml             # Two services: backend + frontend
+├── docker-compose.yml             # Two services: backend + frontend; source bind-mounted for live dev
 ├── data/                          # Database, .env, SSL certs (gitignored)
 ├── requirements.txt
 └── STRATEGY_CONTEXT.md            # AI prompt context for the visual strategy builder

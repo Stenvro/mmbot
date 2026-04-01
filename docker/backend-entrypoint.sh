@@ -59,4 +59,5 @@ echo "[backend] Starting on https://0.0.0.0:8000"
 exec uvicorn backend.main:app \
     --host 0.0.0.0 --port 8000 \
     --ssl-keyfile /app/.cert/key.pem \
-    --ssl-certfile /app/.cert/cert.pem
+    --ssl-certfile /app/.cert/cert.pem \
+    --reload

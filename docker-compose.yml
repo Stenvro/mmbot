@@ -7,6 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+      - ./backend:/app/backend
     restart: unless-stopped
 
   frontend:
@@ -17,6 +18,7 @@ services:
       - "5173:5173"
     volumes:
       - ./data:/app/data
+      - ./frontend/src:/app/frontend/src
     depends_on:
       - backend
     restart: unless-stopped
