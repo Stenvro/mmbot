@@ -22,23 +22,29 @@ router = APIRouter(
 )
 
 @router.get("/positions")
-def get_positions(symbol: str = None, mode: str = None, status: str = None, db: Session = Depends(get_db)):
+def get_positions(symbol: str = None, mode: str = None, status: str = None, limit: int = 0, db: Session = Depends(get_db)):
     query = db.query(Position)
     if symbol:
         formatted_symbol = symbol.replace('-', '/').upper()
         query = query.filter(Position.symbol == formatted_symbol)
     if mode: query = query.filter(Position.mode == mode)
     if status: query = query.filter(Position.status == status)
-    return query.order_by(Position.created_at.desc()).all()
+    query = query.order_by(Position.created_at.desc())
+    if limit > 0:
+        query = query.limit(limit)
+    return query.all()
 
 @router.get("/orders")
-def get_orders(symbol: str = None, mode: str = None, db: Session = Depends(get_db)):
+def get_orders(symbol: str = None, mode: str = None, limit: int = 0, db: Session = Depends(get_db)):
     query = db.query(Order)
     if symbol:
         formatted_symbol = symbol.replace('-', '/').upper()
         query = query.filter(Order.symbol == formatted_symbol)
     if mode: query = query.filter(Order.mode == mode)
-    return query.order_by(Order.timestamp.desc()).all()
+    query = query.order_by(Order.timestamp.desc())
+    if limit > 0:
+        query = query.limit(limit)
+    return query.all()
 
 @router.delete("/bot/{bot_name}")
 def delete_bot_trades(bot_name: str, mode: Optional[str] = None, db: Session = Depends(get_db)):

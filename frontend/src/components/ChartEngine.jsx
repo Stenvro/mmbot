@@ -318,7 +318,7 @@ export default function ChartEngine({ dataset }) {
     };
 
     initChart();
-    const pollInterval = setInterval(updateLatestCandles, 1000);
+    const pollInterval = setInterval(updateLatestCandles, 5000);
     const signalInterval = setInterval(pollData, 5000);
 
     return () => {
@@ -508,20 +508,21 @@ export default function ChartEngine({ dataset }) {
     }); 
   }, [signals, orders, positions, botConfigs, getSnappedTime, snappedTradeMap, candleTimes, snappedSignalMap]); 
 
-  const toggleBotSetting = (botName, settingKey) => { 
-      setBotConfigs(prev => { 
-          const newState = JSON.parse(JSON.stringify(prev)); 
-          newState[botName][settingKey] = !newState[botName][settingKey]; 
-          return newState; 
-      }); 
-  }; 
+  const toggleBotSetting = (botName, settingKey) => {
+      setBotConfigs(prev => ({
+          ...prev,
+          [botName]: { ...prev[botName], [settingKey]: !prev[botName][settingKey] }
+      }));
+  };
 
-  const toggleIndicatorConfig = (targetBotName, indKey) => { 
-      setBotConfigs(prev => { 
-          const newState = JSON.parse(JSON.stringify(prev)); 
-          newState[targetBotName].indicators[indKey] = !newState[targetBotName].indicators[indKey]; 
-          return newState; 
-      }); 
+  const toggleIndicatorConfig = (targetBotName, indKey) => {
+      setBotConfigs(prev => ({
+          ...prev,
+          [targetBotName]: {
+              ...prev[targetBotName],
+              indicators: { ...prev[targetBotName].indicators, [indKey]: !prev[targetBotName].indicators[indKey] }
+          }
+      }));
   }; 
 
   const toggleMenuBot = (botName) => setExpandedMenuBot(expandedMenuBot === botName ? null : botName); 

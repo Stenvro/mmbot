@@ -142,12 +142,15 @@ export default function TradeManager({ setError }) {
         if (uniqueSymbols.length === 0) return;
         setPriceSyncing(true);
         const priceMap = {};
-        for (const sym of uniqueSymbols) {
-            try {
-                const res = await apiClient.get(`/api/data/market-info/${sym.replace('/', '-')}`);
-                if (res.data?.last) priceMap[sym] = res.data.last;
-            } catch { /* silent */ }
-        }
+        const results = await Promise.allSettled(
+            uniqueSymbols.map(sym =>
+                apiClient.get(`/api/data/market-info/${sym.replace('/', '-')}`)
+                    .then(res => ({ sym, price: res.data?.last }))
+            )
+        );
+        results.forEach(r => {
+            if (r.status === 'fulfilled' && r.value.price) priceMap[r.value.sym] = r.value.price;
+        });
         setLivePrices(prev => ({ ...prev, ...priceMap }));
         setPriceSyncing(false);
     }, []);
@@ -400,7 +403,7 @@ export default function TradeManager({ setError }) {
                     ? ((curPrice - d.firstPrice) / d.firstPrice) * 100
                     : null;
                 const edge = bhPct !== null ? strategyPct - bhPct : null;
-                return { symbol, strategyPct, bhPct, edge, totalInvested, strategyPnl };
+                return { symbol, strategyPct, bhPct, edge, strategyPnl };
             });
     }, [closedPositions, activePositions, livePrices]);
 

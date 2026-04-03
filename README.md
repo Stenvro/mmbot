@@ -42,6 +42,16 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **Duplicate Bot** — clone a bot's configuration without copying its trade history or signal cache
 - **Cache Wipe** — clears chart signals and resets the bot's log buffer in one operation
 
+### Performance
+- **SQLite WAL Mode** — write-ahead logging enables concurrent reads during writes; bots no longer block each other on database access
+- **Incremental Backfill Commits** — candle data is committed to the database after each exchange batch, not all at once; eliminates startup race conditions when multiple bots start simultaneously
+- **Eager-Loaded Queries** — `selectinload` on Position → Orders avoids N+1 query overhead in hot paths
+- **Numpy-Backed Backtest Loop** — indicator and signal arrays are pre-extracted from DataFrames before the per-candle iteration
+- **Vectorized Streak Detection** — `increasing_for` / `decreasing_for` conditions use `rolling().sum()` instead of Python loops
+- **Batched Signal Inserts** — signals are committed in 500-row chunks to reduce SQLite write lock duration
+- **Gzip Compression** — nginx compresses JSON, HTML, JS, and CSS responses (threshold: 1 KB)
+- **Container Resource Limits** — docker-compose sets CPU/memory caps per service to prevent resource starvation
+
 ### Backtesting
 - **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods
 - **Fee-Adjusted P&L** — entry/exit fees and slippage applied to all profit calculations; computed fee amounts are stored on each Order record so the analytics page can report accurate total fees paid
@@ -111,6 +121,7 @@ First start takes ~2 minutes (builds images + compiles frontend). Subsequent sta
 | `docker compose logs -f backend` | Backend logs only |
 | `docker compose logs -f frontend` | Frontend logs only |
 | `docker compose build && docker compose up -d` | Full rebuild (after pulling new code or changing Dockerfiles / dependencies) |
+| `docker compose restart backend` | Apply backend code changes (~3–5 sec) |
 
 ---
 
@@ -120,12 +131,18 @@ Source code is bind-mounted into the running containers so you can iterate witho
 
 | Path | Mounted to | Effect |
 | :--- | :--- | :--- |
-| `./backend/` | `/app/backend/` | Live — uvicorn reloads automatically on save |
+| `./backend/` | `/app/backend/` | Restart container to apply changes |
 | `./frontend/src/` | `/app/frontend/src/` | Requires a frontend rebuild trigger (see below) |
 
 ### Backend changes
 
-Just save the file. Uvicorn runs with `--reload` and watches `/app/backend`. Changes take effect in ~1 second.
+After saving a backend file, restart the container:
+
+```bash
+docker compose restart backend
+```
+
+Changes take effect in ~3–5 seconds. Hot-reload (`--reload`) is intentionally disabled to avoid unnecessary restarts from bind-mounted volume events.
 
 ### Frontend changes
 
@@ -248,7 +265,7 @@ This is pre-filled with your detected LAN IP (manual) or `localhost` (Docker). C
 ApexAlgo/
 ├── backend/
 │   ├── core/
-│   │   ├── database.py            # SQLAlchemy engine, session, idempotent migrations
+│   │   ├── database.py            # SQLAlchemy engine, WAL mode, session, idempotent migrations
 │   │   ├── exchange_registry.py   # CCXT exchange factory for all supported exchanges
 │   │   ├── bot_log_buffer.py      # Thin wrapper: push/get/clear bot logs in DB
 │   │   ├── encryption.py          # Fernet credential encryption/decryption
@@ -256,7 +273,7 @@ ApexAlgo/
 │   │   └── security.py            # API key authentication
 │   ├── engine/
 │   │   ├── bot_manager.py         # Core trading engine: backfill, live processing, order execution
-│   │   ├── candle_poller.py       # Universal multi-exchange REST polling
+│   │   ├── candle_poller.py       # Universal multi-exchange REST polling with incremental backfill
 │   │   ├── evaluator.py           # Node graph resolver using pandas_ta
 │   │   └── settings_validator.py  # Bot settings integrity checks
 │   ├── models/
@@ -283,13 +300,13 @@ ApexAlgo/
 ├── docker/
 │   ├── backend.Dockerfile         # Python 3.11 + FastAPI + uvicorn
 │   ├── frontend.Dockerfile        # nginx + Node.js (builds frontend at startup)
-│   ├── backend-entrypoint.sh      # Auto-generates .env + SSL certs, starts uvicorn --reload
+│   ├── backend-entrypoint.sh      # Auto-generates .env + SSL certs, starts uvicorn
 │   ├── frontend-entrypoint.sh     # Waits for .env, builds frontend, starts nginx
-│   └── nginx.conf                 # SPA fallback + SSL on port 5173
+│   └── nginx.conf                 # SPA fallback + SSL on port 5173 + gzip compression
 ├── install/
 │   ├── Setup.sh / Setup.ps1              # Legacy setup (Linux / Windows)
 │   └── Start_ApexAlgo.sh / .ps1          # Legacy start (Linux / Windows)
-├── docker-compose.yml             # Two services: backend + frontend; source bind-mounted for live dev
+├── docker-compose.yml             # Two services: backend + frontend; bind-mounted source, resource limits
 ├── data/                          # Database, .env, SSL certs (gitignored)
 ├── requirements.txt
 └── STRATEGY_CONTEXT.md            # AI prompt context for the visual strategy builder
