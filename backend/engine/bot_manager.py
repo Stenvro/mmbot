@@ -5,7 +5,7 @@ import uuid
 import pandas as pd
 import ccxt
 from datetime import datetime, timezone, timedelta
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from backend.core.database import SessionLocal
 from backend.models.bots import BotConfig
@@ -294,42 +294,40 @@ class BotManager:
                         _db.close()
 
                 initial_count = _count_candles()
-                logger.info("Waiting for sufficient candle data for %s (currently %d candles)...", symbol, initial_count)
-                blb.push(bot.name, "INFO", f"Waiting for candle data: {symbol} ({initial_count} candles)")
-                last_count = -1
-                stagnant_checks = 0
+                if initial_count < lookback_limit:
+                    logger.info("Waiting for sufficient candle data for %s (currently %d/%d candles)...", symbol, initial_count, lookback_limit)
+                    blb.push(bot.name, "INFO", f"Waiting for candle data: {symbol} ({initial_count}/{lookback_limit} candles)")
 
-                while True:
-                    current_count = _count_candles()
-
-                    if current_count >= lookback_limit:
-                        logger.info("Sufficient data available for %s (%d/%d).", symbol, current_count, lookback_limit)
-                        blb.push(bot.name, "INFO", f"Data ready: {symbol} ({current_count}/{lookback_limit} candles)")
-                        break
-
-                    if current_count == last_count:
-                        stagnant_checks += 1
-                        max_stagnant = 24 if current_count == initial_count else 6
-
-                        if stagnant_checks >= max_stagnant:
-                            logger.info("Data ingestion stalled for %s at %d candles. Proceeding with available data.", symbol, current_count)
-                            blb.push(bot.name, "WARN", f"Data stalled at {current_count} candles for {symbol}, proceeding")
+                    max_wait = 300  # 5 minutes max
+                    waited = 0
+                    while waited < max_wait:
+                        current_count = _count_candles()
+                        if current_count >= lookback_limit:
                             break
-                    else:
-                        stagnant_checks = 0
+                        # If we have enough for a minimal run and count is stable, proceed
+                        if current_count >= 50:
+                            time.sleep(2)
+                            waited += 2
+                            if _count_candles() == current_count:
+                                break  # Backfill finished (count stable)
+                            continue
+                        time.sleep(2)
+                        waited += 2
 
-                    last_count = current_count
-                    time.sleep(5)
+                final_count = _count_candles()
+                logger.info("Data available for %s: %d candles.", symbol, final_count)
+                blb.push(bot.name, "INFO", f"Data ready: {symbol} ({final_count} candles)")
 
-                for _ in range(20):
-                    latest_candle = _latest_candle_ts()
-
-                    if latest_candle:
-                        candle_ts = latest_candle[0]
-                        if candle_ts.tzinfo is None: candle_ts = candle_ts.replace(tzinfo=timezone.utc)
-                        diff_seconds = datetime.now(timezone.utc).timestamp() - candle_ts.timestamp()
-                        if diff_seconds <= (tf_seconds * 2): break
-                    time.sleep(1)
+                # Only wait for fresh candles if this bot does live/paper execution
+                if live_mode in ("paper", "live"):
+                    for _ in range(20):
+                        latest_candle = _latest_candle_ts()
+                        if latest_candle:
+                            candle_ts = latest_candle[0]
+                            if candle_ts.tzinfo is None: candle_ts = candle_ts.replace(tzinfo=timezone.utc)
+                            diff_seconds = datetime.now(timezone.utc).timestamp() - candle_ts.timestamp()
+                            if diff_seconds <= (tf_seconds * 2): break
+                        time.sleep(1)
 
                 # Fresh session for the candle read as well — same stale-snapshot reason.
                 candle_db = SessionLocal()
@@ -386,6 +384,13 @@ class BotManager:
                 # Track original amount for weighted profit_pct calculation
                 original_amount = None
 
+                # Pre-extract numpy arrays once — avoids O(n) .iloc index lookups inside the loop
+                entry_arr = entry_series.values
+                exit_arr  = exit_series.values
+                atr_arr   = evaluator.df['atr'].values if 'atr' in evaluator.df.columns else None
+                _standard_cols = {'id', 'timestamp', 'open', 'high', 'low', 'close', 'volume', 'atr'}
+                indicator_cols = [c for c in evaluator.df.columns if c not in _standard_cols]
+
                 for index, row in evaluator.df.iterrows():
                     ts = row['timestamp']
                     if ts.tzinfo is None: ts = ts.replace(tzinfo=timezone.utc)
@@ -395,9 +400,9 @@ class BotManager:
                     current_low = float(row['low'])
                     just_opened_this_tick = False
 
-                    is_buy = bool(entry_series.iloc[index])
-                    is_sell = bool(exit_series.iloc[index])
-                    current_atr = float(evaluator.df['atr'].iloc[index]) if 'atr' in evaluator.df.columns and not pd.isna(evaluator.df['atr'].iloc[index]) else 0.0
+                    is_buy = bool(entry_arr[index])
+                    is_sell = bool(exit_arr[index])
+                    current_atr = float(atr_arr[index]) if atr_arr is not None and not pd.isna(atr_arr[index]) else 0.0
 
                     if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
                         max_pos = int(bot.settings.get("max_positions", 1))
@@ -464,7 +469,7 @@ class BotManager:
                                     open_bt_pos.amount -= close_qty
 
                     if ts not in existing_timestamps:
-                        indicators = { col: float(row[col]) for col in evaluator.df.columns if col not in standard_cols and not pd.isna(row[col]) }
+                        indicators = { col: float(row[col]) for col in indicator_cols if not pd.isna(row[col]) }
                         if indicators:
                             action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
                             new_signals.append(Signal(candle_id=int(row['id']), symbol=symbol, timestamp=ts, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
@@ -499,7 +504,12 @@ class BotManager:
 
                     open_bt_pos = None
 
-                if new_signals: db.bulk_save_objects(new_signals)
+                # Commit signals in batches to avoid holding the SQLite write lock too long
+                for i in range(0, len(new_signals), 500):
+                    db.bulk_save_objects(new_signals[i:i+500])
+                    db.commit()
+                # Always commit — positions/orders from the backtest loop need to be persisted
+                # even when there are no new signals
                 db.commit()
                 logger.info("Backfill complete: '%s' on %s | mode=%s | lookback=%d", bot.name, symbol, live_mode.upper(), lookback_limit)
                 blb.push(bot.name, "INFO", f"Backfill complete: {symbol} | mode={live_mode.upper()} | {lookback_limit} candles")
@@ -551,7 +561,7 @@ class BotManager:
                     # Max drawdown guard: auto-stop bot if drawdown exceeds threshold
                     max_drawdown_pct = float(bot.settings.get("max_drawdown", 0))
                     if max_drawdown_pct > 0:
-                        closed_positions = db.query(Position).filter(
+                        closed_positions = db.query(Position.profit_abs, Position.closed_at).filter(
                             Position.bot_name == bot.name, Position.status == "closed"
                         ).order_by(Position.closed_at).all()
                         if closed_positions:
@@ -705,7 +715,9 @@ class BotManager:
                                 blb.push(bot.name, "ERROR", f"{mode.upper()} BUY failed: {e}")
                                 db.add(Order(exchange=exchange, bot_name=bot.name, mode=mode, symbol=symbol, side="buy", order_type="market", price=current_price, amount=trade_amount, timestamp=latest_time, status="canceled"))
 
-                    active_positions = db.query(Position).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.status == "open", Position.mode == mode).all()
+                    active_positions = db.query(Position).options(
+                        selectinload(Position.orders)
+                    ).filter(Position.bot_name == bot.name, Position.symbol == symbol, Position.status == "open", Position.mode == mode).all()
 
                     for pos in active_positions:
                         if pos.id in just_opened_ids: continue

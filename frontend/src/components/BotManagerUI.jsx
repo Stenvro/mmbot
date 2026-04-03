@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { apiClient } from '../api/client';
 import PageShell from './ui/PageShell';
 import GlowPanel from './ui/GlowPanel';
@@ -17,35 +17,16 @@ function ChevronIcon({ open }) {
   );
 }
 
-export default function BotManagerUI({ setError }) {
-  const [bots, setBots]                     = useState([]);
-  const [loading, setLoading]               = useState(true);
+export default function BotManagerUI({ bots = [], refetchBots, setError }) {
   const [modalConfig, setModalConfig]       = useState(null);
   const [openConsoles, setOpenConsoles]     = useState({});
   const fileInputRef                        = useRef(null);
-
-  const fetchBots = useCallback(async () => {
-    try {
-      const response = await apiClient.get('/api/bots/');
-      setBots(response.data);
-      if (setError) setError(null);
-    } catch (err) {
-      if (setError) setError(err.response?.data?.detail || "Failed to load trading bots.");
-    }
-    setLoading(false);
-  }, [setError]);
-
-  useEffect(() => {
-    fetchBots();
-    const interval = setInterval(fetchBots, 5000);
-    return () => clearInterval(interval);
-  }, [fetchBots]);
 
   const toggleBotState = async (botId, isCurrentlyActive) => {
     try {
       const endpoint = isCurrentlyActive ? `/api/bots/${botId}/stop` : `/api/bots/${botId}/start`;
       await apiClient.post(endpoint);
-      fetchBots();
+      refetchBots();
     } catch (err) {
       if (setError) setError(err.response?.data?.detail || "Failed to toggle bot state.");
     }
@@ -54,7 +35,7 @@ export default function BotManagerUI({ setError }) {
   const executeDelete = async (botId) => {
     try {
       await apiClient.delete(`/api/bots/${botId}`);
-      fetchBots();
+      refetchBots();
       setModalConfig(null);
     } catch (err) {
       if (setError) setError(err.response?.data?.detail || "Failed to delete bot.");
@@ -82,7 +63,7 @@ export default function BotManagerUI({ setError }) {
       onConfirm: async () => {
         try {
           await apiClient.delete(`/api/bots/${encodeURIComponent(bot.name)}/cache`);
-          fetchBots();
+          refetchBots();
           setModalConfig({
             type: 'success',
             title: 'Cache Cleared',
@@ -100,12 +81,11 @@ export default function BotManagerUI({ setError }) {
 
   const updateBotConfig = async (botId, currentBot, updates) => {
     try {
-      setBots(bots.map(b => b.id === botId ? { ...b, ...updates, settings: { ...b.settings, ...(updates.settings || {}) } } : b));
       await apiClient.put(`/api/bots/${botId}`, updates);
-      fetchBots();
+      refetchBots();
     } catch {
       if (setError) setError("Failed to update bot configuration.");
-      fetchBots();
+      refetchBots();
     }
   };
 
@@ -130,7 +110,7 @@ export default function BotManagerUI({ setError }) {
       const text = await file.text();
       const payload = JSON.parse(text);
       await apiClient.post('/api/bots/import', payload);
-      fetchBots();
+      refetchBots();
       setModalConfig({
         type: 'success',
         title: 'Bot Imported',
@@ -149,7 +129,7 @@ export default function BotManagerUI({ setError }) {
   const handleDuplicate = async (bot) => {
     try {
       await apiClient.post(`/api/bots/${bot.id}/duplicate`);
-      fetchBots();
+      refetchBots();
     } catch (err) {
       if (setError) setError(err.response?.data?.detail || "Failed to duplicate bot.");
     }
@@ -192,9 +172,7 @@ export default function BotManagerUI({ setError }) {
         }
       />
 
-      {loading ? (
-        <div className="p-12 text-center text-[#848e9c] animate-pulse tracking-widest text-[10px] uppercase font-bold">Loading Engine...</div>
-      ) : bots.length === 0 ? (
+      {bots.length === 0 ? (
         <GlowPanel className="border-dashed !border-[#202532]">
           <div className="text-center py-8">
             <p className="text-[#848e9c] text-xs mb-3">No trading bots found.</p>

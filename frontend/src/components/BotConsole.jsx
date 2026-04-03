@@ -29,7 +29,10 @@ export default function BotConsole({ botName, isOpen }) {
         );
         const newEntries = res.data?.entries ?? [];
         if (newEntries.length > 0) {
-          setEntries(prev => [...prev, ...newEntries]);
+          setEntries(prev => {
+            const combined = [...prev, ...newEntries];
+            return combined.length > 1000 ? combined.slice(-1000) : combined;
+          });
           setCursor(newEntries[newEntries.length - 1].seq);
         }
       } catch {

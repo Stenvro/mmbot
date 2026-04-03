@@ -19,7 +19,7 @@ export default function App() {
       return savedCharts ? JSON.parse(savedCharts) : [];
   });
 
-  const [runningBots, setRunningBots] = useState([]);
+  const [allBots, setAllBots] = useState([]);
   const [error, setError] = useState(null);
   
   const [showBuilder, setShowBuilder] = useState(false);
@@ -47,19 +47,20 @@ export default function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const fetchRunningBots = useCallback(async () => {
+  const runningBots = allBots.filter(b => b.is_active);
+
+  const refetchBots = useCallback(async () => {
     try {
       const res = await apiClient.get('/api/bots/');
-      const active = res.data.filter(b => b.is_active);
-      setRunningBots(active);
+      setAllBots(res.data);
     } catch (err) {
       console.error("Silent background fetch error:", err);
     }
   }, []);
 
   useEffect(() => {
-    fetchRunningBots(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
-    const botInterval = setInterval(fetchRunningBots, 5000);
+    refetchBots(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
+    const botInterval = setInterval(refetchBots, 5000);
 
     const handleOpenBuilder = (e) => {
         setEditingBot(e.detail || null);
@@ -73,7 +74,7 @@ export default function App() {
       clearInterval(botInterval);
       window.removeEventListener('open-builder', handleOpenBuilder);
     };
-  }, [fetchRunningBots]);
+  }, [refetchBots]);
 
   const handleOpenChart = (dataset) => {
     const chartId = `${dataset.symbol}_${dataset.timeframe}`;
@@ -182,7 +183,7 @@ export default function App() {
 
           {activeView === 'settings' && <Settings setError={setError} />}
 
-          {activeView === 'bots' && <BotManagerUI setError={setError} />}
+          {activeView === 'bots' && <BotManagerUI bots={allBots} refetchBots={refetchBots} setError={setError} />}
 
           {activeView === 'trades' && <TradeManager setError={setError} />}
 

@@ -130,20 +130,13 @@ class NodeEvaluator:
             elif op == "decreasing":
                 return left_s < left_s.shift(1)
             elif op == "increasing_for":
-                # A is increasing for N consecutive bars (right = N)
                 n = int(self.resolve_operand(node.get("right")).iloc[-1]) if node.get("right") is not None else 2
                 inc = (left_s > left_s.shift(1)).astype(int)
-                streak = inc.copy()
-                for i in range(1, n):
-                    streak = streak & inc.shift(i).fillna(0).astype(bool)
-                return streak.astype(bool)
+                return (inc.rolling(window=n, min_periods=n).sum() == n)
             elif op == "decreasing_for":
                 n = int(self.resolve_operand(node.get("right")).iloc[-1]) if node.get("right") is not None else 2
                 dec = (left_s < left_s.shift(1)).astype(int)
-                streak = dec.copy()
-                for i in range(1, n):
-                    streak = streak & dec.shift(i).fillna(0).astype(bool)
-                return streak.astype(bool)
+                return (dec.rolling(window=n, min_periods=n).sum() == n)
 
             right_s = self.resolve_operand(node.get("right"))
 

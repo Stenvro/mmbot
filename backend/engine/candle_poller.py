@@ -96,6 +96,7 @@ class CandlePoller:
         subs: dict = {}
         try:
             active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
+            all_keys = {k.name: k for k in db.query(ExchangeKey).all()}
             for bot in active_bots:
                 settings = bot.settings or {}
                 symbols = settings.get("symbols", [])
@@ -108,9 +109,7 @@ class CandlePoller:
                 exchange_name = settings.get("data_exchange", "okx")
                 api_key_name = settings.get("api_key_name")
                 if api_key_name:
-                    key_record = db.query(ExchangeKey).filter(
-                        ExchangeKey.name == api_key_name
-                    ).first()
+                    key_record = all_keys.get(api_key_name)
                     if key_record:
                         exchange_name = key_record.exchange
 
@@ -167,83 +166,71 @@ class CandlePoller:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         start_ts = now_ms - (lookback_limit * tf_ms)
         current_since = start_ts
-        all_candles: list = []
-
-        while len(all_candles) < lookback_limit:
-            try:
-                batch = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=500)
-            except Exception as exc:
-                logger.warning("Back-fill fetch error %s/%s/%s: %s", exchange_name, symbol, timeframe, exc)
-                break
-
-            if not batch:
-                logger.info("Back-fill: no more data for %s/%s/%s.", exchange_name, symbol, timeframe)
-                break
-
-            all_candles.extend(batch)
-            last_ts = int(batch[-1][0])
-
-            if last_ts >= now_ms or len(batch) < 2:
-                break
-
-            current_since = last_ts + 1
-            time.sleep(0.2)
-
-        if not all_candles:
-            return
-
-        # Deduplicate and keep the most recent lookback_limit candles
-        seen: set = set()
-        deduped = []
-        for c in all_candles:
-            if c[0] not in seen:
-                seen.add(c[0])
-                deduped.append(c)
-        deduped = deduped[-lookback_limit:]
-
-        start_dt = datetime.fromtimestamp(int(deduped[0][0]) / 1000.0, tz=timezone.utc)
-        end_dt = datetime.fromtimestamp(int(deduped[-1][0]) / 1000.0, tz=timezone.utc)
+        total_saved = 0
 
         db: Session = SessionLocal()
         try:
-            existing = db.query(Candle.timestamp).filter(
-                Candle.exchange == exchange_name,
-                Candle.symbol == symbol,
-                Candle.timeframe == timeframe,
-                Candle.timestamp >= start_dt,
-                Candle.timestamp <= end_dt,
-            ).all()
-            existing_times = {
-                r[0].replace(tzinfo=timezone.utc) if r[0].tzinfo is None else r[0]
-                for r in existing
-            }
+            while total_saved < lookback_limit:
+                try:
+                    batch = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=500)
+                except Exception as exc:
+                    logger.warning("Back-fill fetch error %s/%s/%s: %s", exchange_name, symbol, timeframe, exc)
+                    break
 
-            new_candles = []
-            for c in deduped:
-                dt = datetime.fromtimestamp(int(c[0]) / 1000.0, tz=timezone.utc)
-                if dt not in existing_times:
-                    try:
-                        new_candles.append(Candle(
-                            exchange=exchange_name,
-                            symbol=symbol,
-                            timeframe=timeframe,
-                            timestamp=dt,
-                            open=float(c[1]),
-                            high=float(c[2]),
-                            low=float(c[3]),
-                            close=float(c[4]),
-                            volume=float(c[5]),
-                            marketcap=0.0,
-                        ))
-                    except (IndexError, ValueError) as exc:
-                        logger.warning("Malformed candle skipped for %s: %s", symbol, exc)
+                if not batch:
+                    break
 
-            if new_candles:
-                db.bulk_save_objects(new_candles)
-                db.commit()
+                # Deduplicate against DB for this batch's time range
+                batch_start = datetime.fromtimestamp(int(batch[0][0]) / 1000.0, tz=timezone.utc)
+                batch_end = datetime.fromtimestamp(int(batch[-1][0]) / 1000.0, tz=timezone.utc)
+
+                existing_times = {
+                    (r[0].replace(tzinfo=timezone.utc) if r[0].tzinfo is None else r[0])
+                    for r in db.query(Candle.timestamp).filter(
+                        Candle.exchange == exchange_name,
+                        Candle.symbol == symbol,
+                        Candle.timeframe == timeframe,
+                        Candle.timestamp >= batch_start,
+                        Candle.timestamp <= batch_end,
+                    ).all()
+                }
+
+                new_candles = []
+                for c in batch:
+                    dt = datetime.fromtimestamp(int(c[0]) / 1000.0, tz=timezone.utc)
+                    if dt not in existing_times:
+                        try:
+                            new_candles.append(Candle(
+                                exchange=exchange_name,
+                                symbol=symbol,
+                                timeframe=timeframe,
+                                timestamp=dt,
+                                open=float(c[1]),
+                                high=float(c[2]),
+                                low=float(c[3]),
+                                close=float(c[4]),
+                                volume=float(c[5]),
+                                marketcap=0.0,
+                            ))
+                        except (IndexError, ValueError) as exc:
+                            logger.warning("Malformed candle skipped for %s: %s", symbol, exc)
+
+                if new_candles:
+                    db.bulk_save_objects(new_candles)
+                    db.commit()
+                    total_saved += len(new_candles)
+
+                last_ts = int(batch[-1][0])
+                if last_ts >= now_ms or len(batch) < 2:
+                    break
+
+                current_since = last_ts + 1
+                time.sleep(0.2)
+
+            if total_saved > 0:
                 logger.info(
                     "Back-fill complete: %s/%s/%s — saved %d new candles.",
-                    exchange_name, symbol, timeframe, len(new_candles),
+                    exchange_name, symbol, timeframe, total_saved,
                 )
             else:
                 logger.info(
@@ -255,6 +242,20 @@ class CandlePoller:
             logger.error("Back-fill DB error for %s/%s/%s: %s", exchange_name, symbol, timeframe, exc)
         finally:
             db.close()
+
+        # Signal that backfill is done for this subscription
+        try:
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future,
+                event_bus.publish("BACKFILL_COMPLETE", {
+                    "exchange": exchange_name,
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                })
+            )
+        except RuntimeError:
+            pass
 
     # ─────────────────────────────────────────────────────────────────────────
     # Live polling
