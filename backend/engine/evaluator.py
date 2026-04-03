@@ -10,6 +10,7 @@ class NodeEvaluator:
         self.settings = settings
         self.df = pd.DataFrame()
         self.entry_trigger = settings.get("entry_node")
+        self._resolve_cache = {}
 
     def _calculate_indicators(self):
         """Calculates all indicators on the DataFrame using pandas_ta."""
@@ -101,6 +102,9 @@ class NodeEvaluator:
         if not node_id:
             return pd.Series(False, index=self.df.index)
 
+        if node_id in self._resolve_cache:
+            return self._resolve_cache[node_id]
+
         nodes = self.settings.get("nodes", {})
         node = nodes.get(node_id)
         if not node:
@@ -108,49 +112,48 @@ class NodeEvaluator:
             return pd.Series(False, index=self.df.index)
 
         node_class = node.get("class")
+        result = None
 
         if node_class == "indicator":
-            if node_id in self.df.columns:
-                return self.df[node_id]
-            return pd.Series(np.nan, index=self.df.index)
+            result = self.df[node_id] if node_id in self.df.columns else pd.Series(np.nan, index=self.df.index)
 
         elif node_class == "price_data":
             price_type = node.get("type", "close").lower()
             offset = int(node.get("offset", 0))
-            if price_type in self.df.columns:
-                return self.df[price_type].shift(offset)
-            return pd.Series(np.nan, index=self.df.index)
+            result = self.df[price_type].shift(offset) if price_type in self.df.columns else pd.Series(np.nan, index=self.df.index)
 
         elif node_class == "condition":
             left_s = self.resolve_operand(node.get("left"))
             op = node.get("operator")
 
             if op == "increasing":
-                return left_s > left_s.shift(1)
+                result = left_s > left_s.shift(1)
             elif op == "decreasing":
-                return left_s < left_s.shift(1)
+                result = left_s < left_s.shift(1)
             elif op == "increasing_for":
                 n = int(self.resolve_operand(node.get("right")).iloc[-1]) if node.get("right") is not None else 2
                 inc = (left_s > left_s.shift(1)).astype(int)
-                return (inc.rolling(window=n, min_periods=n).sum() == n)
+                result = (inc.rolling(window=n, min_periods=n).sum() == n)
             elif op == "decreasing_for":
                 n = int(self.resolve_operand(node.get("right")).iloc[-1]) if node.get("right") is not None else 2
                 dec = (left_s < left_s.shift(1)).astype(int)
-                return (dec.rolling(window=n, min_periods=n).sum() == n)
+                result = (dec.rolling(window=n, min_periods=n).sum() == n)
+            else:
+                right_s = self.resolve_operand(node.get("right"))
 
-            right_s = self.resolve_operand(node.get("right"))
+                if op == "cross_above":
+                    result = (left_s.shift(1) <= right_s.shift(1)) & (left_s > right_s)
+                elif op == "cross_below":
+                    result = (left_s.shift(1) >= right_s.shift(1)) & (left_s < right_s)
+                elif op == ">": result = left_s > right_s
+                elif op == "<": result = left_s < right_s
+                elif op == ">=": result = left_s >= right_s
+                elif op == "<=": result = left_s <= right_s
+                elif op == "==": result = left_s == right_s
+                elif op == "!=": result = left_s != right_s
 
-            if op == "cross_above":
-                return (left_s.shift(1) <= right_s.shift(1)) & (left_s > right_s)
-            elif op == "cross_below":
-                return (left_s.shift(1) >= right_s.shift(1)) & (left_s < right_s)
-            elif op == ">": return left_s > right_s
-            elif op == "<": return left_s < right_s
-            elif op == ">=": return left_s >= right_s
-            elif op == "<=": return left_s <= right_s
-            elif op == "==": return left_s == right_s
-            elif op == "!=": return left_s != right_s
-            return pd.Series(False, index=self.df.index)
+            if result is None:
+                result = pd.Series(False, index=self.df.index)
 
         elif node_class == "logic":
             # Cast to bool explicitly: a child node may return a numeric series instead of a boolean one
@@ -163,15 +166,19 @@ class NodeEvaluator:
 
             op = node.get("operator", "and").lower()
 
-            if op == "and": return left_s & right_s
-            if op == "or": return left_s | right_s
-            if op == "xor": return left_s ^ right_s
-            if op == "nand": return ~(left_s & right_s)
-            if op == "nor": return ~(left_s | right_s)
-            if op == "not": return ~left_s
-            return pd.Series(False, index=self.df.index)
+            if op == "and": result = left_s & right_s
+            elif op == "or": result = left_s | right_s
+            elif op == "xor": result = left_s ^ right_s
+            elif op == "nand": result = ~(left_s & right_s)
+            elif op == "nor": result = ~(left_s | right_s)
+            elif op == "not": result = ~left_s
+            else: result = pd.Series(False, index=self.df.index)
 
-        return pd.Series(np.nan, index=self.df.index)
+        if result is None:
+            result = pd.Series(np.nan, index=self.df.index)
+
+        self._resolve_cache[node_id] = result
+        return result
 
     def resolve_operand(self, operand) -> pd.Series:
         if isinstance(operand, (int, float)):

@@ -1,7 +1,9 @@
 import asyncio
+import json
 import logging
 import time
 import uuid
+from hashlib import md5
 import pandas as pd
 import ccxt
 from datetime import datetime, timezone, timedelta
@@ -24,11 +26,43 @@ logger = logging.getLogger("apexalgo.bot_manager")
 
 VALID_EXIT_TYPES = {'percentage', 'trailing', 'atr', 'fixed'}
 
+def _indicator_fingerprint(settings):
+    """Stable hash of a bot's indicator node configs."""
+    nodes = settings.get("nodes", {})
+    ind_nodes = {k: v for k, v in sorted(nodes.items()) if v.get("class") == "indicator"}
+    return md5(json.dumps(ind_nodes, sort_keys=True).encode()).hexdigest()
+
+
 class BotManager:
     def __init__(self):
         self.running = False
         self.position_states = {}
         self._position_states_lock = asyncio.Lock()
+        self._drawdown_cache = {}  # bot_name -> {peak_pnl, running_pnl, max_dd}
+
+    def _get_drawdown(self, bot_name, db):
+        """Return cached drawdown state, lazy-initializing from DB on first access."""
+        if bot_name not in self._drawdown_cache:
+            closed = db.query(Position.profit_abs).filter(
+                Position.bot_name == bot_name, Position.status == "closed"
+            ).order_by(Position.closed_at).all()
+            peak = running = dd = 0.0
+            for cp in closed:
+                running += (cp.profit_abs or 0)
+                peak = max(peak, running)
+                if peak > 0:
+                    dd = max(dd, ((peak - running) / peak) * 100)
+            self._drawdown_cache[bot_name] = {"peak_pnl": peak, "running_pnl": running, "max_dd": dd}
+        return self._drawdown_cache[bot_name]
+
+    def _update_drawdown(self, bot_name, profit_abs):
+        """Incrementally update drawdown cache when a position closes."""
+        if bot_name in self._drawdown_cache:
+            s = self._drawdown_cache[bot_name]
+            s["running_pnl"] += (profit_abs or 0)
+            s["peak_pnl"] = max(s["peak_pnl"], s["running_pnl"])
+            if s["peak_pnl"] > 0:
+                s["max_dd"] = max(s["max_dd"], ((s["peak_pnl"] - s["running_pnl"]) / s["peak_pnl"]) * 100)
 
     async def start(self):
         self.running = True
@@ -267,6 +301,7 @@ class BotManager:
                 symbols = [bot.settings.get("symbol")]
 
             for symbol in symbols:
+                blb.push(bot.name, "INFO", f"Starting: {symbol} | {timeframe} | {live_mode} | lookback={lookback_limit}")
                 tf_seconds = 60
                 if timeframe.endswith('m'): tf_seconds = int(timeframe[:-1]) * 60
                 elif timeframe.endswith('h'): tf_seconds = int(timeframe[:-1]) * 3600
@@ -295,28 +330,43 @@ class BotManager:
 
                 initial_count = _count_candles()
                 if initial_count < lookback_limit:
-                    logger.info("Waiting for sufficient candle data for %s (currently %d/%d candles)...", symbol, initial_count, lookback_limit)
-                    blb.push(bot.name, "INFO", f"Waiting for candle data: {symbol} ({initial_count}/{lookback_limit} candles)")
+                    logger.info("Waiting for candle data: %s (%d/%d candles)...", symbol, initial_count, lookback_limit)
+                    blb.push(bot.name, "INFO", f"Fetching historical data: {symbol} ({initial_count}/{lookback_limit} candles)...")
 
                     max_wait = 300  # 5 minutes max
                     waited = 0
+                    stable_checks = 0
+                    last_count = initial_count
+                    last_log_count = initial_count
+
                     while waited < max_wait:
-                        current_count = _count_candles()
-                        if current_count >= lookback_limit:
-                            break
-                        # If we have enough for a minimal run and count is stable, proceed
-                        if current_count >= 50:
-                            time.sleep(2)
-                            waited += 2
-                            if _count_candles() == current_count:
-                                break  # Backfill finished (count stable)
-                            continue
                         time.sleep(2)
                         waited += 2
+                        current_count = _count_candles()
+
+                        # Log progress when count changes significantly
+                        if current_count - last_log_count >= 100:
+                            blb.push(bot.name, "INFO", f"Fetching historical data: {symbol} ({current_count}/{lookback_limit} candles)...")
+                            last_log_count = current_count
+
+                        if current_count >= lookback_limit:
+                            break
+
+                        if current_count == last_count:
+                            stable_checks += 1
+                            if stable_checks >= 3:  # 6 seconds of no change — backfill done
+                                break
+                        else:
+                            stable_checks = 0
+
+                        last_count = current_count
 
                 final_count = _count_candles()
                 logger.info("Data available for %s: %d candles.", symbol, final_count)
-                blb.push(bot.name, "INFO", f"Data ready: {symbol} ({final_count} candles)")
+                if final_count < lookback_limit and final_count > 0:
+                    blb.push(bot.name, "INFO", f"Historical data ready: {symbol} ({final_count}/{lookback_limit} requested)")
+                else:
+                    blb.push(bot.name, "INFO", f"Historical data ready: {symbol} ({final_count} candles)")
 
                 # Only wait for fresh candles if this bot does live/paper execution
                 if live_mode in ("paper", "live"):
@@ -339,9 +389,9 @@ class BotManager:
                 finally:
                     candle_db.close()
 
-                if df.empty or len(df) < 50:
-                    logger.info("Skipping backfill for %s: insufficient data (%d candles, minimum 50 required).", symbol, len(df))
-                    blb.push(bot.name, "WARN", f"Skipping {symbol}: only {len(df)} candles, need 50+")
+                if df.empty or len(df) < 20:
+                    logger.info("Skipping backfill for %s: insufficient data (%d candles, minimum 20 required).", symbol, len(df))
+                    blb.push(bot.name, "WARN", f"Skipping backtest: {symbol} — only {len(df)} candles available (minimum 20)")
                     continue
 
                 df = df.sort_values('timestamp').reset_index(drop=True)
@@ -356,6 +406,7 @@ class BotManager:
                 last_bt_ts = None
 
                 if run_backtest:
+                    blb.push(bot.name, "INFO", f"Running backtest on {len(df)} candles...")
                     last_order = db.query(Order).filter(Order.bot_name == bot.name, Order.symbol == symbol, Order.mode == "backtest").order_by(Order.timestamp.desc()).first()
                     if last_order:
                         last_bt_ts = last_order.timestamp
@@ -511,8 +562,12 @@ class BotManager:
                 # Always commit — positions/orders from the backtest loop need to be persisted
                 # even when there are no new signals
                 db.commit()
-                logger.info("Backfill complete: '%s' on %s | mode=%s | lookback=%d", bot.name, symbol, live_mode.upper(), lookback_limit)
-                blb.push(bot.name, "INFO", f"Backfill complete: {symbol} | mode={live_mode.upper()} | {lookback_limit} candles")
+                trade_count = len(trade_entry_indices) if run_backtest else 0
+                logger.info("Backfill complete: '%s' on %s | mode=%s | %d candles | %d trades", bot.name, symbol, live_mode.upper(), len(df), trade_count)
+                if run_backtest:
+                    blb.push(bot.name, "INFO", f"Backtest complete: {symbol} | {len(df)} candles | {trade_count} trades | mode={live_mode.upper()}")
+                else:
+                    blb.push(bot.name, "INFO", f"Ready: {symbol} | {len(df)} candles | mode={live_mode.upper()}")
 
         except Exception as e:
             logger.error("Backfill Error: %s", e, exc_info=True)
@@ -527,6 +582,13 @@ class BotManager:
             try:
                 active_bots = db.query(BotConfig).filter(BotConfig.is_active == True).all()
 
+                # Batch-load all exchange keys once (avoids per-bot DB queries)
+                all_key_names = {b.settings.get("api_key_name") for b in active_bots if b.settings.get("api_key_name")}
+                key_records = {}
+                if all_key_names:
+                    for kr in db.query(ExchangeKey).filter(ExchangeKey.name.in_(all_key_names)).all():
+                        key_records[kr.name] = kr
+
                 matching_bots = []
                 for b in active_bots:
                     syms = b.settings.get("symbols", [])
@@ -536,7 +598,7 @@ class BotManager:
                     api_key_name = b.settings.get("api_key_name")
                     bot_exchange = b.settings.get("data_exchange", "okx")
                     if api_key_name:
-                        key_rec = db.query(ExchangeKey).filter(ExchangeKey.name == api_key_name).first()
+                        key_rec = key_records.get(api_key_name)
                         if key_rec:
                             bot_exchange = key_rec.exchange or bot_exchange
                     if symbol in syms and b.settings.get("timeframe") == timeframe and bot_exchange == exchange:
@@ -552,38 +614,36 @@ class BotManager:
 
                 df = pd.read_sql(query, db.bind)
 
-                if df.empty or len(df) < 50:
+                if df.empty or len(df) < 20:
                     return
 
                 df = df.sort_values('timestamp').reset_index(drop=True)
+
+                indicator_cache = {}  # fingerprint -> DataFrame with indicators computed
 
                 for bot in matching_bots:
                     # Max drawdown guard: auto-stop bot if drawdown exceeds threshold
                     max_drawdown_pct = float(bot.settings.get("max_drawdown", 0))
                     if max_drawdown_pct > 0:
-                        closed_positions = db.query(Position.profit_abs, Position.closed_at).filter(
-                            Position.bot_name == bot.name, Position.status == "closed"
-                        ).order_by(Position.closed_at).all()
-                        if closed_positions:
-                            peak_pnl = 0.0
-                            running_pnl = 0.0
-                            max_dd = 0.0
-                            for cp in closed_positions:
-                                running_pnl += (cp.profit_abs or 0)
-                                peak_pnl = max(peak_pnl, running_pnl)
-                                if peak_pnl > 0:
-                                    dd = ((peak_pnl - running_pnl) / peak_pnl) * 100
-                                    max_dd = max(max_dd, dd)
-                            if max_dd >= max_drawdown_pct:
-                                logger.warning("Bot '%s' hit max drawdown (%.2f%% >= %.2f%%), auto-stopping", bot.name, max_dd, max_drawdown_pct)
-                                blb.push(bot.name, "WARN", f"Max drawdown hit ({max_dd:.2f}% >= {max_drawdown_pct:.2f}%), auto-stopping")
-                                bot.is_active = False
-                                db.commit()
-                                continue
+                        dd_state = self._get_drawdown(bot.name, db)
+                        if dd_state["max_dd"] >= max_drawdown_pct:
+                            logger.warning("Bot '%s' hit max drawdown (%.2f%% >= %.2f%%), auto-stopping", bot.name, dd_state["max_dd"], max_drawdown_pct)
+                            blb.push(bot.name, "WARN", f"Max drawdown hit ({dd_state['max_dd']:.2f}% >= {max_drawdown_pct:.2f}%), auto-stopping")
+                            bot.is_active = False
+                            self._drawdown_cache.pop(bot.name, None)
+                            db.commit()
+                            continue
+
+                    # Reuse indicator computation across bots with identical indicator configs
+                    fp = _indicator_fingerprint(bot.settings)
+                    if fp not in indicator_cache:
+                        eval_tmp = NodeEvaluator(bot.settings)
+                        eval_tmp.df = df.copy()
+                        eval_tmp._calculate_indicators()
+                        indicator_cache[fp] = eval_tmp.df
 
                     evaluator = NodeEvaluator(bot.settings)
-                    evaluator.df = df.copy()
-                    evaluator._calculate_indicators()
+                    evaluator.df = indicator_cache[fp]
 
                     latest_index = len(evaluator.df) - 1
                     latest_row = evaluator.df.iloc[latest_index]
@@ -607,7 +667,7 @@ class BotManager:
                     api_key_record = None
 
                     if is_api_exec and has_key:
-                        api_key_record = db.query(ExchangeKey).filter(ExchangeKey.name == bot.settings.get("api_key_name")).first()
+                        api_key_record = key_records.get(bot.settings.get("api_key_name"))
                         if api_key_record:
                             mode = "paper" if api_key_record.is_sandbox else "live"
                         else:
@@ -786,6 +846,7 @@ class BotManager:
                                 if close_qty >= pos.amount - 0.00001:
                                     pos.status = "closed"
                                     pos.closed_at = latest_time
+                                    self._update_drawdown(bot.name, pos.profit_abs)
                                     if pos.id in self.position_states:
                                         del self.position_states[pos.id]
                                 else:

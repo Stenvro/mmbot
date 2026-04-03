@@ -7,7 +7,7 @@ const LEVEL_COLOR = {
   ERROR: 'text-[#f6465d]',
 };
 
-export default function BotConsole({ botName, isOpen }) {
+export default function BotConsole({ botName, isOpen, clearSignal = 0 }) {
   const [entries, setEntries]       = useState([]);
   const [cursor, setCursor]         = useState(0);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -17,6 +17,15 @@ export default function BotConsole({ botName, isOpen }) {
 
   // Keep cursorRef in sync so the interval closure always sees the latest value
   useEffect(() => { cursorRef.current = cursor; }, [cursor]);
+
+  // Reset entries when cache is wiped (clearSignal incremented by parent)
+  useEffect(() => {
+    if (clearSignal > 0) {
+      setEntries([]);
+      setCursor(0);
+      cursorRef.current = 0;
+    }
+  }, [clearSignal]);
 
   // Poll only while open
   useEffect(() => {

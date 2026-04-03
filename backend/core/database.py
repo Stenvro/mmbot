@@ -96,6 +96,8 @@ def run_migrations():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_positions_botname_status ON positions (bot_name, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_posid_side_status ON orders (position_id, side, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_symbol_botname   ON signals (symbol, bot_name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_cooldown          ON orders (bot_name, symbol, mode, side, timestamp)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candles_lookup           ON candles (exchange, symbol, timeframe, timestamp)"))
 
         conn.commit()
 

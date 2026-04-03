@@ -20,6 +20,8 @@ function ChevronIcon({ open }) {
 export default function BotManagerUI({ bots = [], refetchBots, setError }) {
   const [modalConfig, setModalConfig]       = useState(null);
   const [openConsoles, setOpenConsoles]     = useState({});
+  const [busyAction, setBusyAction]        = useState(null);  // 'delete:ID' or 'wipe:name'
+  const [clearSignals, setClearSignals]     = useState({});
   const fileInputRef                        = useRef(null);
 
   const toggleBotState = async (botId, isCurrentlyActive) => {
@@ -33,6 +35,8 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
   };
 
   const executeDelete = async (botId) => {
+    if (busyAction) return;
+    setBusyAction(`delete:${botId}`);
     try {
       await apiClient.delete(`/api/bots/${botId}`);
       refetchBots();
@@ -41,6 +45,7 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
       if (setError) setError(err.response?.data?.detail || "Failed to delete bot.");
       setModalConfig(null);
     }
+    setBusyAction(null);
   };
 
   const handleDeleteClick = (botId, botName) => {
@@ -61,9 +66,12 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
       message: `Are you sure you want to clear all drawn signals and indicator data for '${bot.name}' from the chart? Your trade ledger will remain intact.`,
       confirmText: 'Clear Cache',
       onConfirm: async () => {
+        if (busyAction) return;
+        setBusyAction(`wipe:${bot.name}`);
         try {
           await apiClient.delete(`/api/bots/${encodeURIComponent(bot.name)}/cache`);
           refetchBots();
+          setClearSignals(prev => ({ ...prev, [bot.name]: (prev[bot.name] || 0) + 1 }));
           setModalConfig({
             type: 'success',
             title: 'Cache Cleared',
@@ -74,6 +82,7 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
         } catch {
           setModalConfig({ type: 'danger', title: 'Error', message: "Failed to clear cache.", confirmText: 'OK', onConfirm: () => setModalConfig(null) });
         }
+        setBusyAction(null);
       },
       onCancel: () => setModalConfig(null)
     });
@@ -141,7 +150,7 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
 
   return (
     <PageShell glowColor="green">
-      <Modal config={modalConfig} />
+      <Modal config={modalConfig ? { ...modalConfig, busy: !!busyAction } : null} />
       <input
         type="file"
         ref={fileInputRef}
@@ -327,7 +336,7 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
                     consoleOpen ? 'max-h-56 opacity-100' : 'max-h-0 opacity-0'
                   }`}
                 >
-                  <BotConsole botName={bot.name} isOpen={consoleOpen} />
+                  <BotConsole botName={bot.name} isOpen={consoleOpen} clearSignal={clearSignals[bot.name] || 0} />
                 </div>
 
                 {/* ── Card Footer ── */}
@@ -344,7 +353,7 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
                     <div className="w-px h-3 bg-[#202532]" />
                     <button
                       onClick={() => handleClearCacheClick(bot)}
-                      disabled={bot.is_active}
+                      disabled={bot.is_active || !!busyAction}
                       className="text-[#fcd535] hover:text-[#e5c02a] text-[9px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
                     >
                       WIPE CACHE
@@ -352,7 +361,7 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
                     <div className="w-px h-3 bg-[#202532]" />
                     <button
                       onClick={() => handleDeleteClick(bot.id, bot.name)}
-                      disabled={bot.is_active}
+                      disabled={bot.is_active || !!busyAction}
                       className="text-[#f6465d] hover:text-[#f6465d]/80 text-[9px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
                     >
                       DELETE

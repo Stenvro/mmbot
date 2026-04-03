@@ -1,7 +1,7 @@
 import logging
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -18,6 +18,7 @@ from backend.core.events import event_bus
 from backend.core.security import verify_api_key
 from backend.engine.settings_validator import validate_bot_settings
 from backend.core import bot_log_buffer as blb
+from backend.models.bot_logs import BotLog
 
 logger = logging.getLogger("apexalgo.bots")
 
@@ -220,8 +221,23 @@ async def flush_bot_data(bot_name: str):
 
     await asyncio.to_thread(_flush)
 
+def _cleanup_bot_data(bot_name: str):
+    """Background task: delete all trade data and logs for a removed bot."""
+    db = SessionLocal()
+    try:
+        db.query(Order).filter(Order.bot_name == bot_name).delete()
+        db.query(Position).filter(Position.bot_name == bot_name).delete()
+        db.query(Signal).filter(Signal.bot_name == bot_name).delete()
+        db.query(BotLog).filter(BotLog.bot_name == bot_name).delete()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("Background cleanup failed for '%s': %s", bot_name, e)
+    finally:
+        db.close()
+
 @router.delete("/{bot_id}")
-def delete_bot(bot_id: int, db: Session = Depends(get_db)):
+def delete_bot(bot_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found.")
@@ -229,13 +245,13 @@ def delete_bot(bot_id: int, db: Session = Depends(get_db)):
     if bot.is_active:
         raise HTTPException(status_code=400, detail="Cannot delete a running bot. Stop it first.")
 
-    # Delete orders first (before positions) to respect foreign key constraints
-    db.query(Order).filter(Order.bot_name == bot.name).delete()
-    db.query(Position).filter(Position.bot_name == bot.name).delete()
-    db.query(Signal).filter(Signal.bot_name == bot.name).delete()
+    bot_name = bot.name
     db.delete(bot)
     db.commit()
-    return {"message": f"Bot '{bot.name}' deleted.", "is_active": False}
+
+    # Heavy cleanup (orders, positions, signals, logs) runs after response is sent
+    background_tasks.add_task(_cleanup_bot_data, bot_name)
+    return {"message": f"Bot '{bot_name}' deleted.", "is_active": False}
 
 @router.post("/{bot_id}/start")
 async def start_bot(bot_id: int, db: Session = Depends(get_db)):

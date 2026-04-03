@@ -40,20 +40,28 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **Export to File** — save any bot's strategy and settings to a portable `.apex.json` file
 - **Import from File** — restore a bot from a previously exported file; name collisions are resolved automatically
 - **Duplicate Bot** — clone a bot's configuration without copying its trade history or signal cache
-- **Cache Wipe** — clears chart signals and resets the bot's log buffer in one operation
+- **Cache Wipe** — clears chart signals, resets the bot's log buffer, and clears the frontend console in one operation
 
 ### Performance
 - **SQLite WAL Mode** — write-ahead logging enables concurrent reads during writes; bots no longer block each other on database access
 - **Incremental Backfill Commits** — candle data is committed to the database after each exchange batch, not all at once; eliminates startup race conditions when multiple bots start simultaneously
+- **Indicator Fingerprinting** — bots sharing the same indicator configuration reuse computed results via MD5-based fingerprint keys, avoiding redundant pandas_ta calls in the live processing loop
+- **Evaluator Memoization** — `resolve_node()` caches resolved Series per evaluation cycle so diamond-shaped node graphs don't recompute shared indicator nodes
+- **Drawdown Caching** — cumulative drawdown is lazy-initialized from the database and updated incrementally on position close, replacing per-candle aggregate queries
+- **Composite Indexes** — dedicated indexes on orders (cooldown checks) and candles (lookup by exchange/symbol/timeframe/timestamp) for hot-path query performance
+- **Batched Exchange Key Loading** — exchange keys are fetched once per processing cycle with a single `IN` query instead of per-bot lookups
 - **Eager-Loaded Queries** — `selectinload` on Position → Orders avoids N+1 query overhead in hot paths
 - **Numpy-Backed Backtest Loop** — indicator and signal arrays are pre-extracted from DataFrames before the per-candle iteration
 - **Vectorized Streak Detection** — `increasing_for` / `decreasing_for` conditions use `rolling().sum()` instead of Python loops
 - **Batched Signal Inserts** — signals are committed in 500-row chunks to reduce SQLite write lock duration
+- **Background Bot Deletion** — deleting a bot returns instantly; heavy cleanup of orders, positions, signals, and logs runs asynchronously after the response
 - **Gzip Compression** — nginx compresses JSON, HTML, JS, and CSS responses (threshold: 1 KB)
 - **Container Resource Limits** — docker-compose sets CPU/memory caps per service to prevent resource starvation
 
 ### Backtesting
 - **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods
+- **Stable Backfill Detection** — waits for 3 consecutive stable candle counts (6 seconds) before proceeding, preventing premature backtest starts when exchange data is still loading
+- **Adaptive Lookback** — if the exchange has fewer candles than requested (e.g. 5,000 available vs. 50,000 requested), the backtest runs on whatever is available (minimum 20 candles required)
 - **Fee-Adjusted P&L** — entry/exit fees and slippage applied to all profit calculations; computed fee amounts are stored on each Order record so the analytics page can report accurate total fees paid
 - **Automatic Position Closure** — open positions at backtest end are closed at last price with proper P&L
 
@@ -272,9 +280,9 @@ ApexAlgo/
 │   │   ├── events.py              # Async event bus (CANDLE_CLOSED, BOT_STATE_CHANGED)
 │   │   └── security.py            # API key authentication
 │   ├── engine/
-│   │   ├── bot_manager.py         # Core trading engine: backfill, live processing, order execution
+│   │   ├── bot_manager.py         # Core trading engine: backfill, live processing, order execution, indicator fingerprinting, drawdown caching
 │   │   ├── candle_poller.py       # Universal multi-exchange REST polling with incremental backfill
-│   │   ├── evaluator.py           # Node graph resolver using pandas_ta
+│   │   ├── evaluator.py           # Node graph resolver using pandas_ta (memoized per evaluation cycle)
 │   │   └── settings_validator.py  # Bot settings integrity checks
 │   ├── models/
 │   │   ├── bots.py                # BotConfig ORM
@@ -361,8 +369,12 @@ Logs are written to the `bot_logs` SQLite table by `bot_manager.py` at key execu
 
 | Event | Level |
 | :--- | :--- |
+| Bot starting (symbol, timeframe, mode, lookback) | INFO |
 | Waiting for candle data / data ready / data stalled | INFO / WARN |
-| Backfill complete or error | INFO / ERROR |
+| Backfill progress (every 100 candles) | INFO |
+| Backfill complete (candle count + trade count) | INFO |
+| Exchange limit reached (fewer candles than requested) | INFO |
+| Running backtest on N candles | INFO |
 | BUY filled / rejected / failed | INFO / WARN / ERROR |
 | SELL filled / failed | INFO / ERROR |
 | Max drawdown auto-stop | WARN |

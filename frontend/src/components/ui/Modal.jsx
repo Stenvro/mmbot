@@ -38,14 +38,15 @@ const Modal = ({ config, customBody }) => {
           {config.onConfirm && (
             <button
               onClick={config.onConfirm}
-              className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all duration-200"
+              disabled={config.busy}
+              className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
               style={{
                 background: colors.accent,
                 color: config.type === 'warning' ? '#181a20' : '#fff',
                 boxShadow: `0 0 15px ${colors.accent}25`,
               }}
             >
-              {config.confirmText || 'Confirm'}
+              {config.busy ? 'Processing...' : (config.confirmText || 'Confirm')}
             </button>
           )}
         </div>
