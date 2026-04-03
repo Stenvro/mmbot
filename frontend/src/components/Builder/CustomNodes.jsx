@@ -328,7 +328,7 @@ export const IndicatorNode = ({ id, data }) => {
       )}
 
     </div>
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#12151c] -right-[16px]" />
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-10 h-10 bg-[#fcd535] border-[4px] border-[#12151c] -right-[20px]" />
   </div>
   );
 };
@@ -359,14 +359,14 @@ export const PriceDataNode = ({ id, data }) => (
          </select>
       </div>
     </div>
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#12151c] -right-[16px]" />
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-10 h-10 bg-[#fcd535] border-[4px] border-[#12151c] -right-[20px]" />
   </div>
 );
 
 export const ConditionNode = ({ id, data }) => (
   <div className="bg-[#12151c]/90 backdrop-blur-xl border border-[#202532] rounded-xl shadow-lg min-w-[260px] relative">
-    <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-8 h-8 bg-[#0ea5e9] border-[4px] border-[#12151c] -left-[16px]" />
-    <Handle type="target" position={Position.Left} id="right" style={{ top: '80%' }} className="w-8 h-8 bg-[#d946ef] border-[4px] border-[#12151c] -left-[16px]" />
+    <Handle type="target" position={Position.Left} id="left" style={{ top: '38%' }} className="w-10 h-10 bg-[#0ea5e9] border-[4px] border-[#12151c] -left-[20px]" />
+    <Handle type="target" position={Position.Left} id="right" style={{ top: '80%' }} className="w-10 h-10 bg-[#d946ef] border-[4px] border-[#12151c] -left-[20px]" />
     
     <div className="bg-[#202532]/30 px-3 py-2 border-b border-[#202532]/50 flex justify-between items-center">
       <span className="font-bold text-[#eaecef] text-[11px] uppercase tracking-wider">DATA CONDITION</span>
@@ -402,7 +402,7 @@ export const ConditionNode = ({ id, data }) => (
       </div>
     </div>
     
-    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#12151c] -right-[16px]" />
+    <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-10 h-10 bg-[#fcd535] border-[4px] border-[#12151c] -right-[20px]" />
   </div>
 );
 
@@ -410,9 +410,9 @@ export const LogicNode = ({ id, data }) => {
   const isSingleInput = data.logicType === "not";
   return (
     <div className="bg-[#12151c]/90 backdrop-blur-xl border border-[#2ea043] rounded-xl shadow-lg min-w-[200px] relative">
-      <Handle type="target" position={Position.Left} id="in1" style={{ top: isSingleInput ? '50%' : '35%' }} className="w-8 h-8 bg-[#848e9c] border-[4px] border-[#12151c] -left-[16px]" />
+      <Handle type="target" position={Position.Left} id="in1" style={{ top: isSingleInput ? '50%' : '35%' }} className="w-10 h-10 bg-[#848e9c] border-[4px] border-[#12151c] -left-[20px]" />
       {!isSingleInput && (
-        <Handle type="target" position={Position.Left} id="in2" style={{ top: '65%' }} className="w-8 h-8 bg-[#848e9c] border-[4px] border-[#12151c] -left-[16px]" />
+        <Handle type="target" position={Position.Left} id="in2" style={{ top: '65%' }} className="w-10 h-10 bg-[#848e9c] border-[4px] border-[#12151c] -left-[20px]" />
       )}
       <div className="bg-[#2ea043]/10 px-3 py-2 border-b border-[#2ea043]/30 flex justify-between items-center">
         <span className="font-bold text-[#2ea043] text-[11px] uppercase tracking-wider">LOGIC GATE</span>
@@ -428,7 +428,7 @@ export const LogicNode = ({ id, data }) => {
           <option value="not">NOT (Invert Input)</option>
         </select>
       </div>
-      <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-8 h-8 bg-[#fcd535] border-[4px] border-[#12151c] -right-[16px]" />
+      <Handle type="source" position={Position.Right} style={{ top: '50%' }} className="w-10 h-10 bg-[#fcd535] border-[4px] border-[#12151c] -right-[20px]" />
     </div>
   );
 };
@@ -440,7 +440,7 @@ export const LogicNode = ({ id, data }) => {
 export const StopLossNode = ({ id, data }) => (
   <div className="bg-[#12151c]/90 backdrop-blur-xl border border-[#f6465d] rounded-xl shadow-lg min-w-[280px] relative">
     
-    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-8 h-8 bg-[#f6465d] border-[4px] border-[#12151c] -left-[16px]" />
+    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-10 h-10 bg-[#f6465d] border-[4px] border-[#12151c] -left-[20px]" />
     
     <div className="bg-[#f6465d]/10 px-3 py-2 border-b border-[#f6465d]/30 flex justify-between items-center">
       <span className="font-bold text-[#f6465d] text-[11px] uppercase tracking-wider">STOP LOSS (RISK)</span>
@@ -479,7 +479,7 @@ export const StopLossNode = ({ id, data }) => (
 export const TakeProfitNode = ({ id, data }) => (
   <div className="bg-[#12151c]/90 backdrop-blur-xl border border-[#2ebd85] rounded-xl shadow-lg min-w-[280px] relative">
     
-    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-8 h-8 bg-[#2ebd85] border-[4px] border-[#12151c] -left-[16px]" />
+    <Handle type="target" position={Position.Left} style={{ top: '50%' }} className="w-10 h-10 bg-[#2ebd85] border-[4px] border-[#12151c] -left-[20px]" />
 
     <div className="bg-[#2ebd85]/10 px-3 py-2 border-b border-[#2ebd85]/30 flex justify-between items-center">
       <span className="font-bold text-[#2ebd85] text-[11px] uppercase tracking-wider">TAKE PROFIT (TARGET)</span>
@@ -534,7 +534,7 @@ export const ActionNode = ({ id, data }) => {
       <div className="p-4 bg-[#080a0f]/80 rounded-b space-y-4">
          
          <div className="relative border border-[#202532] rounded p-3">
-             <Handle type="target" position={Position.Left} id="logic" className="w-8 h-8 bg-[#848e9c] border-[4px] border-[#12151c] -left-[16px]" style={{ top: '50%' }} />
+             <Handle type="target" position={Position.Left} id="logic" className="w-10 h-10 bg-[#848e9c] border-[4px] border-[#12151c] -left-[20px]" style={{ top: '50%' }} />
              <span className="absolute -left-14 top-1/2 -translate-y-1/2 text-[9px] font-bold text-[#848e9c] -rotate-90">LOGIC</span>
              
              <div className="flex space-x-2">
@@ -580,11 +580,11 @@ export const ActionNode = ({ id, data }) => {
          {isBuy && (
              <div className="relative border border-[#202532] rounded p-3 pt-4 pb-4 mt-2">
                  
-                 <Handle type="source" position={Position.Right} id="tp" className="w-8 h-8 bg-[#2ebd85] border-[4px] border-[#12151c] -right-[16px]" style={{ top: '30%' }} />
-                 <span className="absolute right-[8px] top-[30%] -translate-y-1/2 text-[9px] font-bold text-[#2ebd85] translate-x-full">TP</span>
-                 
-                 <Handle type="source" position={Position.Right} id="sl" className="w-8 h-8 bg-[#f6465d] border-[4px] border-[#12151c] -right-[16px]" style={{ top: '70%' }} />
-                 <span className="absolute right-[8px] top-[70%] -translate-y-1/2 text-[9px] font-bold text-[#f6465d] translate-x-full">SL</span>
+                 <Handle type="source" position={Position.Right} id="tp" className="w-10 h-10 bg-[#2ebd85] border-[4px] border-[#12151c] -right-[20px]" style={{ top: '25%' }} />
+                 <span className="absolute right-[13px] top-[25%] -translate-y-1/2 text-[9px] font-bold text-[#2ebd85] pointer-events-none">TP</span>
+
+                 <Handle type="source" position={Position.Right} id="sl" className="w-10 h-10 bg-[#f6465d] border-[4px] border-[#12151c] -right-[20px]" style={{ top: '75%' }} />
+                 <span className="absolute right-[13px] top-[75%] -translate-y-1/2 text-[9px] font-bold text-[#f6465d] pointer-events-none">SL</span>
                  
                  <div className="text-[9px] text-[#848e9c] italic text-center leading-relaxed">
                      Connect Take Profit or Stop Loss blocks to the <span className="text-[#2ebd85] font-bold">TP</span> and <span className="text-[#f6465d] font-bold">SL</span> ports on the right.
