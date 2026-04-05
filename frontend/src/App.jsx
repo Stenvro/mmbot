@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
 import DataManager from './components/DataManager';
-import ChartEngine from './components/ChartEngine';
 import Settings from './components/Settings';
 import BotManagerUI from './components/BotManagerUI';
 import TradeManager from './components/TradeManager';
-import BotBuilder from './components/Builder/BotBuilder';
 import Home from './components/Home';
 import { apiClient } from './api/client';
+
+const ChartEngine = lazy(() => import('./components/ChartEngine'));
+const BotBuilder = lazy(() => import('./components/Builder/BotBuilder'));
 
 export default function App() {
   const [activeView, setActiveView] = useState(() => {
@@ -26,6 +27,7 @@ export default function App() {
   const [editingBot, setEditingBot] = useState(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 768);
+  const pollIntervalRef = useRef(15000);
 
   useEffect(() => {
       localStorage.setItem('apex_activeView', activeView);
@@ -51,19 +53,37 @@ export default function App() {
 
   const refetchBots = useCallback(async () => {
     try {
-      const res = await apiClient.get('/api/bots/');
+      const res = await apiClient.get('/api/bots/summary');
       setAllBots(res.data);
-    } catch (err) {
-      console.error("Silent background fetch error:", err);
+      pollIntervalRef.current = 15000;
+    } catch {
+      pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 60000);
     }
   }, []);
 
   useEffect(() => {
     refetchBots(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
-    const botInterval = setInterval(refetchBots, 15000);
+    let botTimer;
+    const schedulePoll = () => {
+      botTimer = setTimeout(() => {
+        refetchBots().finally(schedulePoll);
+      }, pollIntervalRef.current);
+    };
+    schedulePoll();
 
-    const handleOpenBuilder = (e) => {
-        setEditingBot(e.detail || null);
+    const handleOpenBuilder = async (e) => {
+        const botSummary = e.detail || null;
+        if (botSummary && botSummary.id) {
+            // Fetch full bot config (summary endpoint doesn't include nodes/edges)
+            try {
+                const res = await apiClient.get(`/api/bots/by-id/${botSummary.id}`);
+                setEditingBot(res.data);
+            } catch {
+                setEditingBot(botSummary);
+            }
+        } else {
+            setEditingBot(null);
+        }
         setShowBuilder(true);
         if (window.innerWidth < 768) setSidebarOpen(false);
     };
@@ -71,7 +91,7 @@ export default function App() {
     window.addEventListener('open-builder', handleOpenBuilder);
 
     return () => {
-      clearInterval(botInterval);
+      clearTimeout(botTimer);
       window.removeEventListener('open-builder', handleOpenBuilder);
     };
   }, [refetchBots]);
@@ -185,12 +205,14 @@ export default function App() {
 
           {activeView === 'bots' && <BotManagerUI bots={allBots} refetchBots={refetchBots} setError={setError} />}
 
-          {activeView === 'trades' && <TradeManager setError={setError} />}
+          {activeView === 'trades' && <TradeManager setError={setError} bots={allBots} />}
 
           {openCharts.map(chart => (
             activeView === chart.id && (
               <div key={chart.id} className="flex-1 w-full h-full relative border-t-0 border border-[#202532] fade-in">
-                 <ChartEngine dataset={chart} />
+                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[#848e9c] text-xs uppercase tracking-wider">Loading chart...</div>}>
+                   <ChartEngine dataset={chart} />
+                 </Suspense>
               </div>
             )
           ))}
@@ -200,7 +222,9 @@ export default function App() {
 
       {showBuilder && (
         <div className="absolute inset-0 z-[100] bg-[#080a0f] fade-in">
-           <BotBuilder closeBuilder={() => setShowBuilder(false)} editingBot={editingBot} />
+           <Suspense fallback={<div className="flex-1 flex items-center justify-center h-full text-[#848e9c] text-xs uppercase tracking-wider">Loading builder...</div>}>
+             <BotBuilder closeBuilder={() => setShowBuilder(false)} editingBot={editingBot} />
+           </Suspense>
         </div>
       )}
 

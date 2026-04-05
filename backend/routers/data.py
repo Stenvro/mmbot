@@ -16,6 +16,10 @@ from backend.core.exchange_registry import build_exchange, SUPPORTED_EXCHANGES
 
 logger = logging.getLogger("apexalgo.data")
 
+# TTL cache for market-info responses (reduces exchange API calls)
+_ticker_cache: dict[str, tuple[float, dict]] = {}
+_TICKER_TTL = 10  # seconds
+
 router = APIRouter(
     prefix="/api/data",
     tags=["Market Data"],
@@ -234,27 +238,38 @@ def get_candles(
     db: Session = Depends(get_db)
 ):
     formatted_symbol = symbol.replace('-', '/').upper()
-    query = db.query(Candle).filter(
+    # Use raw column query (no ORM object hydration) for speed with large datasets
+    query = db.query(
+        Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume
+    ).filter(
         Candle.symbol == formatted_symbol,
         Candle.timeframe == x_timeframe,
     )
     if exchange:
         query = query.filter(Candle.exchange == exchange.lower())
-    query = query.order_by(Candle.timestamp.desc())
+    query = query.order_by(Candle.timestamp.asc())
     if limit:
-        query = query.limit(limit)
-    candles = query.all()
-    candles.reverse()
+        # When limited, fetch the most recent N candles (DESC then reverse)
+        query = db.query(
+            Candle.timestamp, Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume
+        ).filter(
+            Candle.symbol == formatted_symbol,
+            Candle.timeframe == x_timeframe,
+        )
+        if exchange:
+            query = query.filter(Candle.exchange == exchange.lower())
+        query = query.order_by(Candle.timestamp.desc()).limit(limit)
+        rows = query.all()
+        rows.reverse()
+    else:
+        rows = query.all()
+
     return [
         {
-            "time": int(c.timestamp.replace(tzinfo=timezone.utc).timestamp()),
-            "open": c.open,
-            "high": c.high,
-            "low": c.low,
-            "close": c.close,
-            "value": c.volume,
+            "time": int(ts.replace(tzinfo=timezone.utc).timestamp()) if ts.tzinfo is None else int(ts.timestamp()),
+            "open": o, "high": h, "low": l, "close": c, "value": v,
         }
-        for c in candles
+        for ts, o, h, l, c, v in rows
     ]
 
 
@@ -262,10 +277,17 @@ def get_candles(
 def get_market_info(symbol: str, exchange: str = "okx"):
     try:
         exchange_id = exchange.lower()
-        exch = build_exchange(exchange_id)
         formatted_symbol = symbol.replace('-', '/').upper()
+        cache_key = f"{exchange_id}:{formatted_symbol}"
+
+        now = time.monotonic()
+        cached = _ticker_cache.get(cache_key)
+        if cached and (now - cached[0]) < _TICKER_TTL:
+            return cached[1]
+
+        exch = build_exchange(exchange_id)
         ticker = exch.fetch_ticker(formatted_symbol)
-        return {
+        result = {
             "symbol": formatted_symbol,
             "last": ticker.get('last', 0),
             "change_24h": ticker.get('percentage', 0),
@@ -273,5 +295,7 @@ def get_market_info(symbol: str, exchange: str = "okx"):
             "low_24h": ticker.get('low', 0),
             "vol_24h": ticker.get('baseVolume', 0),
         }
+        _ticker_cache[cache_key] = (now, result)
+        return result
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch market info: {str(e)}")

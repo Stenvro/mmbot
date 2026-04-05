@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import { apiClient } from '../api/client';
 import { INDICATOR_SCALE_MAP } from './Builder/indicatorConfig'; 
@@ -45,7 +45,7 @@ const formatCrypto = (val) => {
     return Number(val).toFixed(6).replace(/\.?0+$/, '');  
 }; 
 
-export default function ChartEngine({ dataset }) {
+function ChartEngine({ dataset }) {
   const chartContainerRef = useRef(); 
   const chartRef = useRef(null); 
   const candleSeriesRef = useRef(null); 
@@ -158,13 +158,13 @@ export default function ChartEngine({ dataset }) {
   const pollData = async () => {
     try {
       const safeSymbol = dataset.symbol.replace('/', '-');
-      const sigParams = { symbol: dataset.symbol, timeframe: dataset.timeframe, limit: 5000 };
+      const sigParams = { symbol: dataset.symbol, timeframe: dataset.timeframe, limit: 200000 };
       if (lastSignalIdRef.current > 0) sigParams.since_id = lastSignalIdRef.current;
 
       const [sigRes, ordRes, posRes] = await Promise.all([
           apiClient.get(`/api/bots/signals`, { params: sigParams }),
-          apiClient.get(`/api/trades/orders`, { params: { symbol: safeSymbol, limit: 1000 } }),
-          apiClient.get(`/api/trades/positions`, { params: { symbol: safeSymbol, limit: 1000 } })
+          apiClient.get(`/api/trades/orders`, { params: { symbol: safeSymbol, limit: 50000 } }),
+          apiClient.get(`/api/trades/positions`, { params: { symbol: safeSymbol, limit: 50000 } })
       ]);
 
       const newSigs = sigRes.data || [];
@@ -298,7 +298,7 @@ export default function ChartEngine({ dataset }) {
 
         const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
             headers: { 'x-timeframe': dataset.timeframe },
-            params: { limit: 10000 },
+            params: {},
             signal
         });
 
@@ -744,6 +744,8 @@ export default function ChartEngine({ dataset }) {
 
         <div ref={chartContainerRef} className="absolute inset-0 z-0" /> 
       </div> 
-    </div> 
-  ); 
+    </div>
+  );
 }
+
+export default memo(ChartEngine);

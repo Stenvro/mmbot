@@ -44,7 +44,9 @@ export default function DataManager({ openChart, setError }) {
   }, [setError]);
 
   useEffect(() => {
+    const controller = new AbortController();
     fetchSummary(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
+    return () => controller.abort();
   }, [fetchSummary]);
 
   const handleFilterSymbol = useCallback((val) => {
@@ -186,7 +188,7 @@ export default function DataManager({ openChart, setError }) {
 
   return (
     <PageShell glowColor="gold">
-      <Modal config={modalConfig} />
+      <Modal config={modalConfig ? { ...modalConfig, busy: loading } : null} />
 
       {/* Prune modal — custom body */}
       {pruneModalConfig && (
@@ -213,16 +215,17 @@ export default function DataManager({ openChart, setError }) {
               <div className="flex justify-end space-x-3 pt-2">
                 <button
                   onClick={() => executeDelete(pruneModalConfig.symbol, pruneModalConfig.timeframe, '')}
-                  className="px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all duration-200 border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10"
+                  disabled={loading}
+                  className="px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all duration-200 border border-[#f6465d]/50 text-[#f6465d] hover:bg-[#f6465d]/10 disabled:opacity-50"
                 >
-                  Delete All
+                  {loading ? 'Deleting...' : 'Delete All'}
                 </button>
                 <button
                   onClick={() => executeDelete(pruneModalConfig.symbol, pruneModalConfig.timeframe, pruneDate)}
-                  disabled={!pruneDate}
+                  disabled={!pruneDate || loading}
                   className="px-4 py-2 rounded-lg text-[10px] font-bold uppercase transition-all duration-200 bg-[#f6465d] hover:bg-[#f6465d]/80 text-white disabled:opacity-30 shadow-[0_0_12px_rgba(246,70,93,0.15)]"
                 >
-                  Prune Date
+                  {loading ? 'Deleting...' : 'Prune Date'}
                 </button>
               </div>
             </div>

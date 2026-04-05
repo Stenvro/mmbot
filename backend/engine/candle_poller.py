@@ -34,7 +34,8 @@ class CandlePoller:
         self.running = False
         self.needs_reconnect = False
         self._poll_tasks: list[asyncio.Task] = []
-        self._exchange_cache: dict[str, object] = {}  # exchange_id → ccxt instance
+        self._exchange_cache: dict[str, tuple[float, object]] = {}  # exchange_id → (created_at, ccxt instance)
+        self._exchange_cache_ttl = 3600  # rebuild exchange instances after 1 hour
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public interface
@@ -387,9 +388,13 @@ class CandlePoller:
 
     def _get_public_exchange(self, exchange_name: str):
         """Return a cached unauthenticated exchange instance for public market data."""
-        if exchange_name not in self._exchange_cache:
-            self._exchange_cache[exchange_name] = build_exchange(exchange_name)
-        return self._exchange_cache[exchange_name]
+        now = time.monotonic()
+        cached = self._exchange_cache.get(exchange_name)
+        if cached and (now - cached[0]) < self._exchange_cache_ttl:
+            return cached[1]
+        instance = build_exchange(exchange_name)
+        self._exchange_cache[exchange_name] = (now, instance)
+        return instance
 
 
 candle_poller = CandlePoller()

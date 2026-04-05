@@ -118,7 +118,7 @@ const Stat = ({ label, value, sub, accent = 'white', border = '#202532' }) => {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export default function TradeManager({ setError }) {
+export default function TradeManager({ setError, bots = [] }) {
     const [positions, setPositions] = useState([]);
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -129,6 +129,7 @@ export default function TradeManager({ setError }) {
 
     const [livePrices, setLivePrices] = useState({});
     const [priceSyncing, setPriceSyncing] = useState(false);
+    const [busyAction, setBusyAction] = useState(false);
 
     const [filterBot, setFilterBot] = useState('all');
     const [filterSymbol, setFilterSymbol] = useState('all');
@@ -159,8 +160,8 @@ export default function TradeManager({ setError }) {
         setLoading(true);
         try {
             const [posRes, ordRes] = await Promise.all([
-                apiClient.get('/api/trades/positions'),
-                apiClient.get('/api/trades/orders'),
+                apiClient.get('/api/trades/positions', { params: { limit: 0 } }),
+                apiClient.get('/api/trades/orders', { params: { limit: 0 } }),
             ]);
             const pos = posRes.data || [];
             const ord = ordRes.data || [];
@@ -175,7 +176,9 @@ export default function TradeManager({ setError }) {
     }, [setError, fetchLivePrices]);
 
     useEffect(() => {
+        const controller = new AbortController();
         fetchAllData(); // eslint-disable-line react-hooks/set-state-in-effect
+        return () => controller.abort();
     }, [fetchAllData]);
 
     const positionsRef = useRef(positions);
@@ -196,6 +199,7 @@ export default function TradeManager({ setError }) {
             message: 'Permanently delete this trade from the ledger? This will affect your statistics.',
             confirmText: 'Delete',
             onConfirm: async () => {
+                setBusyAction(true);
                 try {
                     await apiClient.delete(`/api/trades/positions/${id}`);
                     fetchAllData();
@@ -203,6 +207,7 @@ export default function TradeManager({ setError }) {
                 } catch {
                     setModalConfig({ type: 'danger', title: 'Error', message: 'Failed to delete trade.', confirmText: 'OK', onConfirm: () => setModalConfig(null) });
                 }
+                setBusyAction(false);
             },
             onCancel: () => setModalConfig(null),
         });
@@ -215,6 +220,7 @@ export default function TradeManager({ setError }) {
             message: 'Close this position at the last known local market price? It will be added to your Historical Ledger.',
             confirmText: 'Force Close',
             onConfirm: async () => {
+                setBusyAction(true);
                 setLoading(true);
                 try {
                     const res = await apiClient.post(`/api/trades/positions/${id}/close`);
@@ -224,6 +230,7 @@ export default function TradeManager({ setError }) {
                     setModalConfig({ type: 'danger', title: 'Error', message: e.response?.data?.detail || 'Failed to close.', confirmText: 'OK', onConfirm: () => setModalConfig(null) });
                 }
                 setLoading(false);
+                setBusyAction(false);
             },
             onCancel: () => setModalConfig(null),
         });
@@ -237,17 +244,18 @@ export default function TradeManager({ setError }) {
             message: `WARNING: Permanently delete ALL ${closedPositions.length} historical trades matching your current filters?`,
             confirmText: 'DELETE ALL FILTERED',
             onConfirm: async () => {
+                setBusyAction(true);
                 setLoading(true);
-                const results = await Promise.allSettled(closedPositions.map(p => apiClient.delete(`/api/trades/positions/${p.id}`)));
-                const failed = results.filter(r => r.status === 'rejected').length;
-                const succeeded = results.length - failed;
-                fetchAllData();
-                if (failed > 0) {
-                    setModalConfig({ type: 'warning', title: 'Partial Delete', message: `Deleted ${succeeded} trades, ${failed} failed.`, confirmText: 'OK', onConfirm: () => setModalConfig(null) });
-                } else {
+                try {
+                    const ids = closedPositions.map(p => p.id);
+                    await apiClient.post('/api/trades/positions/bulk-delete', ids);
+                    fetchAllData();
                     setModalConfig(null);
+                } catch {
+                    setModalConfig({ type: 'danger', title: 'Error', message: 'Failed to delete trades.', confirmText: 'OK', onConfirm: () => setModalConfig(null) });
                 }
                 setLoading(false);
+                setBusyAction(false);
             },
             onCancel: () => setModalConfig(null),
         });
@@ -284,7 +292,17 @@ export default function TradeManager({ setError }) {
     const uniqueSymbols = useMemo(() => [...new Set([...positions, ...orders].map(x => x.symbol).filter(Boolean))], [positions, orders]);
     const uniqueExchanges = useMemo(() => [...new Set([...positions, ...orders].map(x => x.exchange || 'okx').filter(Boolean))], [positions, orders]);
 
-    // ── Entry order timestamp lookup (shared by stats + ledger rows) ──────────
+    // ── Pre-computed lookups (shared by stats + ledger rows) ───────────────
+
+    const feesByPosId = useMemo(() => {
+        const map = {};
+        for (const o of orders) {
+            if (o.position_id && o.fee) {
+                map[o.position_id] = (map[o.position_id] || 0) + o.fee;
+            }
+        }
+        return map;
+    }, [orders]);
 
     const entryTsByPos = useMemo(() => {
         const map = {};
@@ -308,14 +326,21 @@ export default function TradeManager({ setError }) {
         const winRate = closedPositions.length > 0 ? (wins.length / closedPositions.length) * 100 : 0;
         const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? 999 : 0);
 
-        // Max drawdown — absolute dollars so it's always meaningful even when the
-        // equity curve never goes significantly positive (e.g. a bear-market backtest)
+        // Max drawdown — percentage of peak equity using backtest_capital as starting equity
         const sorted = [...closedPositions].sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
-        let equity = 0, peak = 0, maxDD = 0;
+        // Look up backtest_capital from bot config (default $1000)
+        const filteredBotNames = [...new Set(sorted.map(p => p.bot_name).filter(Boolean))];
+        const capitalPerBot = filteredBotNames.map(name => {
+            const bot = bots.find(b => b.name === name);
+            return bot?.settings?.backtest_capital || 1000;
+        });
+        const startingCapital = capitalPerBot.length > 0 ? Math.max(...capitalPerBot) : 1000;
+
+        let equity = startingCapital, peakEq = startingCapital, maxDDpct = 0;
         for (const p of sorted) {
             equity += (p.profit_abs || 0);
-            if (equity > peak) peak = equity;
-            maxDD = Math.max(maxDD, peak - equity);
+            if (equity > peakEq) peakEq = equity;
+            if (peakEq > 0) maxDDpct = Math.max(maxDDpct, ((peakEq - equity) / peakEq) * 100);
         }
 
         // Avg hold time — use entry order timestamps as fallback for backtest positions
@@ -356,14 +381,14 @@ export default function TradeManager({ setError }) {
             losses: losses.length,
             total: closedPositions.length,
             profitFactor,
-            maxDD,
+            maxDDpct,
             avgHoldMs,
             sharpe,
             totalFees,
             avgWin: wins.length > 0 ? grossProfit / wins.length : 0,
             avgLoss: losses.length > 0 ? grossLoss / losses.length : 0,
         };
-    }, [closedPositions, orders, entryTsByPos]);
+    }, [closedPositions, orders, entryTsByPos, bots]);
 
     // ── Equity curve data ─────────────────────────────────────────────────────
 
@@ -398,10 +423,14 @@ export default function TradeManager({ setError }) {
             .filter(([, d]) => d.positions.length > 0)
             .map(([symbol, d]) => {
                 const strategyPnl = d.positions.reduce((s, p) => s + (p.profit_abs || 0), 0);
-                // Strategy % = total absolute PnL / total capital deployed.
-                // This correctly handles multi-bot: 3 bots × $1000 losing $1500 = -50%, not -150%.
-                const totalCapital = d.positions.reduce((s, p) => s + ((p.entry_price || 0) * (p.amount || 0)), 0);
-                const strategyPct = totalCapital > 0 ? (strategyPnl / totalCapital) * 100 : 0;
+                // Strategy % = total PnL / backtest_capital — same $1000 base as B&H comparison
+                const botNames = [...new Set(d.positions.map(p => p.bot_name).filter(Boolean))];
+                const botCapitals = botNames.map(name => {
+                    const bot = bots.find(b => b.name === name);
+                    return bot?.settings?.backtest_capital || 1000;
+                });
+                const capital = botCapitals.length > 0 ? Math.max(...botCapitals) : 1000;
+                const strategyPct = capital > 0 ? (strategyPnl / capital) * 100 : 0;
                 const curPrice = livePrices[symbol];
                 const bhPct = (curPrice && d.firstPrice > 0)
                     ? ((curPrice - d.firstPrice) / d.firstPrice) * 100
@@ -409,7 +438,7 @@ export default function TradeManager({ setError }) {
                 const edge = bhPct !== null ? strategyPct - bhPct : null;
                 return { symbol, strategyPct, bhPct, edge, strategyPnl };
             });
-    }, [closedPositions, activePositions, livePrices]);
+    }, [closedPositions, activePositions, livePrices, bots]);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -436,9 +465,7 @@ export default function TradeManager({ setError }) {
             if (closedPositions.length === 0) return;
             const headers = ['Date Closed', 'Bot', 'Exchange', 'Mode', 'Symbol', 'Side', 'Entry', 'Exit', 'Amount', 'Hold Time', 'Return %', 'Net PNL', 'Fees'];
             const rows = closedPositions.map(p => {
-                const fees = orders
-                    .filter(o => o.position_id === p.id)
-                    .reduce((s, o) => s + (o.fee || 0), 0);
+                const fees = feesByPosId[p.id] || 0;
                 const holdMs = p.closed_at && p.created_at ? new Date(p.closed_at) - new Date(p.created_at) : 0;
                 const exit = getExitPrice(p);
                 return [
@@ -498,7 +525,7 @@ export default function TradeManager({ setError }) {
 
     return (
         <PageShell glowColor="cyan">
-            <Modal config={modalConfig} />
+            <Modal config={modalConfig ? { ...modalConfig, busy: busyAction } : null} />
 
             {/* ── FILTER BAR ─────────────────────────────────────────────────── */}
             <div className="terminal-card px-4 py-3 flex flex-wrap gap-x-5 gap-y-2.5 items-center justify-between sticky top-0 z-20">
@@ -541,7 +568,7 @@ export default function TradeManager({ setError }) {
                         <span>Export</span>
                     </button>
                     <button onClick={fetchAllData} disabled={loading} className="bg-[#202532] hover:bg-[#2b3545] text-[#eaecef] text-[9px] font-bold uppercase px-4 py-1.5 rounded-lg transition-all disabled:opacity-50">
-                        {loading ? '...' : 'Sync'}
+                        {loading ? 'Syncing...' : 'Sync'}
                     </button>
                 </div>
             </div>
@@ -571,8 +598,8 @@ export default function TradeManager({ setError }) {
                 />
                 <Stat
                     label="Max Drawdown"
-                    value={stats.total > 0 ? `-$${safeNum(stats.maxDD)}` : '—'}
-                    sub="peak-to-trough equity"
+                    value={stats.total > 0 ? `-${safeNum(stats.maxDDpct, 1)}%` : '—'}
+                    sub="peak-to-trough equity %"
                     accent="red"
                     border="#f6465d"
                 />
@@ -824,9 +851,7 @@ export default function TradeManager({ setError }) {
                                             const entryTs = entryTsByPos[pos.id];
                                             return (entryTs && closedTs > entryTs) ? closedTs - entryTs : 0;
                                         })();
-                                        const posFees = orders
-                                            .filter(o => o.position_id === pos.id)
-                                            .reduce((s, o) => s + (o.fee || 0), 0);
+                                        const posFees = feesByPosId[pos.id] || 0;
                                         return (
                                             <tr key={pos.id} className="border-b border-[#202532]/40 hover:bg-[#fcd535]/[0.02] transition-colors group">
                                                 <td className="px-4 py-2.5 font-mono text-[#848e9c] text-[10px]">

@@ -455,10 +455,10 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   );
 };
 
-export default function BotBuilderWrapper(props) {
+export default React.memo(function BotBuilderWrapper(props) {
   return (
     <ReactFlowProvider>
       <BotBuilderFlow {...props} />
     </ReactFlowProvider>
   );
-}
+});

@@ -71,6 +71,10 @@ app.include_router(bots.router)
 app.include_router(trades.router)
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 @app.get("/", dependencies=[Depends(verify_api_key)])
 def read_root():
     return {"status": "online", "message": "ApexAlgo Engine is running and modularized!"}

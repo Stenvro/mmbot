@@ -3,6 +3,7 @@ import json
 import asyncio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body, Query
 from fastapi.responses import Response
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel
@@ -50,6 +51,40 @@ class BotResponse(BotBase):
 def get_all_bots(db: Session = Depends(get_db)):
     return db.query(BotConfig).all()
 
+
+@router.get("/by-id/{bot_id}", response_model=BotResponse)
+def get_bot_by_id(bot_id: int, db: Session = Depends(get_db)):
+    bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+    return bot
+
+
+@router.get("/summary")
+def get_bots_summary(db: Session = Depends(get_db)):
+    """Lightweight bot list for polling — excludes full settings/node graph."""
+    bots = db.query(BotConfig).all()
+    return [
+        {
+            "id": b.id,
+            "name": b.name,
+            "is_active": b.is_active,
+            "is_sandbox": b.is_sandbox,
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+            "settings": {
+                "timeframe": b.settings.get("timeframe") if b.settings else None,
+                "symbols": b.settings.get("symbols", []) if b.settings else [],
+                "symbol": b.settings.get("symbol") if b.settings else None,
+                "api_execution": b.settings.get("api_execution", False) if b.settings else False,
+                "api_key_name": b.settings.get("api_key_name") if b.settings else None,
+                "backtest_on_start": b.settings.get("backtest_on_start", False) if b.settings else False,
+                "backtest_capital": b.settings.get("backtest_capital", 1000) if b.settings else 1000,
+            }
+        }
+        for b in bots
+    ]
+
+
 @router.get("/signals")
 def get_bot_signals(symbol: str, timeframe: str, limit: int = Query(default=5000, le=200000), since_id: int = Query(default=0, ge=0), db: Session = Depends(get_db)):
     bot_rows = db.query(BotConfig.name, BotConfig.settings).all()
@@ -62,32 +97,29 @@ def get_bot_signals(symbol: str, timeframe: str, limit: int = Query(default=5000
     if not valid_bot_names:
         return []
 
-    query = db.query(Signal).filter(
+    # Use raw column query to avoid ORM overhead on large signal sets
+    query = db.query(
+        Signal.id, Signal.candle_id, Signal.symbol, Signal.timestamp,
+        Signal.bot_name, Signal.name, Signal.action, Signal.value, Signal.extra_data
+    ).filter(
         Signal.symbol == symbol,
         Signal.bot_name.in_(valid_bot_names)
     )
     if since_id > 0:
         query = query.filter(Signal.id > since_id)
 
-    signals = query.order_by(Signal.timestamp.desc()).limit(limit).all()
-    signals.reverse()
+    rows = query.order_by(Signal.timestamp.desc()).limit(limit).all()
+    rows.reverse()
 
-    result = []
-    for s in signals:
-        signal_dict = {
-            "id": s.id,
-            "candle_id": s.candle_id,
-            "symbol": s.symbol,
-            "timestamp": int(s.timestamp.replace(tzinfo=timezone.utc).timestamp()) if s.timestamp else None,
-            "bot_name": s.bot_name,
-            "name": s.name,
-            "action": s.action,
-            "value": s.value,
-            "extra_data": s.extra_data if isinstance(s.extra_data, dict) else (json.loads(s.extra_data) if isinstance(s.extra_data, str) else {})
+    return [
+        {
+            "id": sid, "candle_id": cid, "symbol": sym,
+            "timestamp": int(ts.replace(tzinfo=timezone.utc).timestamp()) if ts else None,
+            "bot_name": bn, "name": nm, "action": act, "value": val,
+            "extra_data": ed if isinstance(ed, dict) else (json.loads(ed) if isinstance(ed, str) else {})
         }
-        result.append(signal_dict)
-
-    return result
+        for sid, cid, sym, ts, bn, nm, act, val, ed in rows
+    ]
 
 @router.post("/")
 def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
@@ -333,7 +365,8 @@ def get_bot_logs(bot_name: str, since: int = Query(default=0)):
 @router.delete("/{bot_name}/cache")
 def clear_bot_cache(bot_name: str, db: Session = Depends(get_db)):
     try:
-        deleted_signals = db.query(Signal).filter(Signal.bot_name == bot_name).delete(synchronize_session=False)
+        result = db.execute(text("DELETE FROM signals WHERE bot_name = :bn"), {"bn": bot_name})
+        deleted_signals = result.rowcount
         db.commit()
         blb.clear(bot_name)
         return {"status": "success", "message": f"Cache cleared. {deleted_signals} signals removed. Log buffer reset."}

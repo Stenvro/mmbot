@@ -15,6 +15,24 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  build: {
+    target: 'esnext',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/')) {
+            return 'react-vendor';
+          }
+          if (id.includes('node_modules/lightweight-charts')) {
+            return 'chart';
+          }
+          if (id.includes('node_modules/reactflow') || id.includes('node_modules/@reactflow')) {
+            return 'flow';
+          }
+        }
+      }
+    }
+  },
   server: {
     host: '0.0.0.0',
     port: 5173,

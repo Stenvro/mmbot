@@ -95,8 +95,10 @@ def run_migrations():
         # ── signals — deduplicate and add unique constraint ────────────────────
         if "signals" in existing_tables:
             # Check if the unique constraint already exists by looking for the index
-            sig_indexes = {idx['name'] for idx in inspector.get_indexes('signals')}
-            if 'uq_signal_bot_symbol_ts' not in sig_indexes:
+            # Check if the unique constraint already exists (works for both named and auto-generated SQLite indexes)
+            existing_idx_rows = conn.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='signals'")).fetchone()
+            has_unique = existing_idx_rows and 'UNIQUE' in (existing_idx_rows[0] or '').upper()
+            if not has_unique:
                 logger.info("Migration: rebuilding signals table to add unique constraint...")
                 # Deduplicate: keep the row with the highest id per (bot_name, symbol, timestamp)
                 conn.execute(text("""
@@ -140,6 +142,9 @@ def run_migrations():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_symbol_botname   ON signals (symbol, bot_name)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_cooldown          ON orders (bot_name, symbol, mode, side, timestamp)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candles_lookup           ON candles (exchange, symbol, timeframe, timestamp)"))
+        # Composite indexes for batch position loading and signal dedup
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_positions_bot_status_mode_symbol ON positions (bot_name, status, mode, symbol)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_bot_symbol_ts ON signals (bot_name, symbol, timestamp)"))
 
         conn.commit()
 

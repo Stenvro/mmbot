@@ -9,6 +9,7 @@ export default function Settings({ setError }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingKey, setDeletingKey] = useState(null);
 
   const [balances, setBalances] = useState({});
   const [fetchingBalanceFor, setFetchingBalanceFor] = useState(null);
@@ -52,7 +53,9 @@ export default function Settings({ setError }) {
   }, [setError]);
 
   useEffect(() => {
+    const controller = new AbortController();
     fetchKeys(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
+    return () => controller.abort();
   }, [fetchKeys]);
 
   const handleSave = async (e) => {
@@ -87,7 +90,7 @@ export default function Settings({ setError }) {
   };
 
   const executeDelete = async (delName) => {
-    setLoading(true);
+    setDeletingKey(delName);
     try {
       await apiClient.delete(`/api/keys/${delName}`);
       setBalances(prev => {
@@ -101,7 +104,7 @@ export default function Settings({ setError }) {
       if (setError) setError(err.response?.data?.detail || err.message);
       setModalConfig(null);
     }
-    setLoading(false);
+    setDeletingKey(null);
   };
 
   const handleDeleteClick = (delName) => {
@@ -198,7 +201,7 @@ export default function Settings({ setError }) {
 
   return (
     <PageShell glowColor="gold">
-      <Modal config={modalConfig} />
+      <Modal config={modalConfig ? { ...modalConfig, busy: !!deletingKey || loading } : null} />
 
       {/* Swap modal */}
       {swapModal && (
@@ -307,17 +310,17 @@ export default function Settings({ setError }) {
                           disabled={fetchingBalanceFor === k.name}
                           className="text-[#848e9c] hover:text-[#eaecef] text-[10px] font-bold uppercase transition-colors px-3 py-1.5 rounded-lg disabled:opacity-50"
                         >
-                          {fetchingBalanceFor === k.name ? '...' : balances[k.name] ? 'Hide Assets' : 'Assets'}
+                          {fetchingBalanceFor === k.name ? 'Loading...' : balances[k.name] ? 'Hide Assets' : 'Assets'}
                         </button>
                       </>
                     )}
                     <span className="text-[#202532]">|</span>
                     <button
                       onClick={() => handleDeleteClick(k.name)}
-                      disabled={loading}
-                      className="text-[#f6465d] hover:text-[#f6465d]/80 text-[10px] font-bold uppercase transition-colors px-2 py-1.5"
+                      disabled={deletingKey === k.name}
+                      className="text-[#f6465d] hover:text-[#f6465d]/80 text-[10px] font-bold uppercase transition-colors px-2 py-1.5 disabled:opacity-50"
                     >
-                      Delete
+                      {deletingKey === k.name ? 'Deleting...' : 'Delete'}
                     </button>
                   </div>
                 </div>
