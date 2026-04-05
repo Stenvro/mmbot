@@ -6,6 +6,7 @@ data/
 .env.*
 *.pem
 *.key
+.cert
 .cert/
 CLAUDE.md
 

@@ -214,25 +214,25 @@ This is the same `data/` folder used by the manual install scripts — both meth
 
 ## Manual Installation (without Docker)
 
-Legacy setup scripts are available in the `install/` folder for running ApexAlgo directly on the host machine.
+Setup scripts in `install/` run ApexAlgo directly on the host using `screen` sessions.
 
 ### Requirements
 
 | Dependency | Version | Notes |
 | :--- | :--- | :--- |
-| Python | 3.11+ | |
-| Node.js | 18+ | |
-| mkcert | latest | Installed automatically |
-| screen | any | Linux only |
+| Python | 3.11+ | Auto-installed if missing |
+| Node.js | 18+ | Auto-installed if missing |
+| mkcert | latest | Auto-installed if missing |
+| screen | any | Auto-installed if missing |
 
-### Linux — Ubuntu / Debian / Arch / Raspberry Pi
+### Setup
 
 ```bash
 git clone https://github.com/Stenvro/ApexAlgo.git
 cd ApexAlgo
-chmod +x install/Setup.sh install/Start_ApexAlgo.sh
-bash install/Setup.sh
-bash install/Start_ApexAlgo.sh
+chmod +x install/*.sh
+./install/Setup.sh
+./install/Start_ApexAlgo.sh
 ```
 
 Services run in detached `screen` sessions:
@@ -245,16 +245,21 @@ screen -r apex_frontend   # attach to frontend
 - **Detach** (keep running): `Ctrl+A` then `D`
 - **Stop process**: `Ctrl+C`
 
-### Windows — PowerShell
+### Switching Between Docker and Screen Sessions
 
-```powershell
-git clone https://github.com/Stenvro/ApexAlgo.git
-cd ApexAlgo
-powershell -ExecutionPolicy Bypass -File .\install\Setup.ps1
-.\install\Start_ApexAlgo.ps1
+Both methods share the same `data/` directory (database, certs, `.env`). Use the switch script to move between them:
+
+```bash
+./install/Switch_Mode.sh
 ```
 
-`Setup.ps1` uses **winget** to install Python, Node.js, and mkcert if they are not already present. `Start_ApexAlgo.ps1` opens two separate PowerShell windows — one for the backend, one for the frontend.
+The script auto-detects which mode is currently running and switches to the other. It handles:
+- SQLite WAL checkpoint before stopping (prevents data corruption)
+- Cleanup of Docker artifacts (stale symlinks, build cache, cert ownership)
+- Cleanup of bare-metal symlinks when switching back to Docker
+- Health check after starting Docker
+
+If nothing is running, it prompts which mode to start.
 
 ### Environment Variables
 
@@ -321,8 +326,9 @@ ApexAlgo/
 │   ├── frontend-entrypoint.sh     # Waits for .env, builds frontend, starts nginx
 │   └── nginx.conf                 # SPA fallback + SSL on port 5173 + gzip compression
 ├── install/
-│   ├── Setup.sh / Setup.ps1              # Legacy setup (Linux / Windows)
-│   └── Start_ApexAlgo.sh / .ps1          # Legacy start (Linux / Windows)
+│   ├── Setup.sh                   # Full setup (Python, Node, venv, deps, certs, .env)
+│   ├── Start_ApexAlgo.sh          # Start backend + frontend in screen sessions
+│   └── Switch_Mode.sh             # Switch between Docker and screen sessions
 ├── docker-compose.yml             # Two services: backend + frontend; bind-mounted source, resource limits
 ├── data/                          # Database, .env, SSL certs (gitignored)
 ├── requirements.txt
