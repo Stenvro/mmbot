@@ -315,8 +315,11 @@ export default function BotManagerUI({ bots = [], refetchBots, setError }) {
         onConfirm: () => setModalConfig(null)
       });
     } catch (err) {
-      const detail = err.response?.data?.detail || "Invalid bot file. The file may be corrupted or from an incompatible version.";
-      setModalConfig({ type: 'danger', title: 'Import Failed', message: String(detail), confirmText: 'OK', onConfirm: () => setModalConfig(null) });
+      const raw = err.response?.data?.detail;
+      const detail = typeof raw === 'string' ? raw
+          : raw?.validation_errors ? raw.validation_errors.join('\n')
+          : "Invalid bot file. The file may be corrupted or from an incompatible version.";
+      setModalConfig({ type: 'danger', title: 'Import Failed', message: detail, confirmText: 'OK', onConfirm: () => setModalConfig(null) });
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }

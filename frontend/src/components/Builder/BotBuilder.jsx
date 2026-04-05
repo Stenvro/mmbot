@@ -28,6 +28,193 @@ const parseSafeFloat = (val) => {
     return isNaN(parsed) ? "" : parsed;
 };
 
+/**
+ * Reconstruct ReactFlow nodes + edges from bot settings when ui_layout is empty.
+ * This handles bots created programmatically or imported without visual layout data.
+ */
+function rebuildLayoutFromSettings(settings, updateNodeData, deleteNode) {
+    const nodes = [];
+    const edges = [];
+    const edgeStyle = { stroke: '#848e9c', strokeWidth: 2 };
+    const GAP = 50; // universal gap between nodes
+
+    // ── Measured rendered widths and heights from CSS min-w + content ──
+    const SIZE = {
+        config:    { w: 300, h: 620 },
+        whitelist: { w: 280, h: 120 },
+        backtest:  { w: 300, h: 130 },
+        apiKey:    { w: 280, h: 160 },
+        indicator: { w: 270, h: 200 }, // base; grows with params
+        priceData: { w: 240, h: 190 },
+        condition: { w: 280, h: 200 },
+        logic:     { w: 220, h: 90  },
+        action:    { w: 340, h: 280 },
+        actionExit:{ w: 340, h: 200 },
+        tp:        { w: 300, h: 180 },
+        sl:        { w: 300, h: 180 },
+    };
+
+    // ── AREA 1: Setup & Context ──
+    // Config left, context blocks stacked right
+    nodes.push({
+        id: 'rebuilt_config', type: 'botConfig', position: { x: 50, y: 50 },
+        data: {
+            onChange: updateNodeData, onDelete: deleteNode, botName: '',
+            timeframe: settings.timeframe || '1m',
+            executionMode: settings.api_execution ? 'exchange' : 'paper',
+            maxPositions: settings.max_positions ?? 1,
+            maxPositionsScope: settings.max_positions_scope || 'per_pair',
+            cooldownTrades: settings.cooldown_trades ?? 0,
+            cooldownCandles: settings.cooldown_candles ?? 0,
+            maxDrawdown: settings.max_drawdown ?? 0,
+            maxOrderValue: settings.max_order_value ?? 0,
+        }
+    });
+
+    const ctxX = 50 + SIZE.config.w + GAP + 20;
+    let ctxY = 50;
+
+    const pairs = settings.symbols?.join(', ') || settings.symbol || 'BTC/USDC';
+    nodes.push({ id: 'rebuilt_whitelist', type: 'whitelist', position: { x: ctxX, y: ctxY },
+        data: { onChange: updateNodeData, onDelete: deleteNode, pairs } });
+    ctxY += SIZE.whitelist.h + GAP + 20;
+
+    if (settings.backtest_on_start !== undefined) {
+        nodes.push({ id: 'rebuilt_backtest', type: 'backtest', position: { x: ctxX, y: ctxY },
+            data: { onChange: updateNodeData, onDelete: deleteNode,
+                runOnStart: settings.backtest_on_start ?? true,
+                capital: settings.backtest_capital ?? 1000,
+                lookback: settings.backtest_lookback ?? 150 } });
+        ctxY += SIZE.backtest.h + GAP + 20;
+    }
+
+    if (settings.api_key_name || settings.data_exchange) {
+        nodes.push({ id: 'rebuilt_apikey', type: 'apiKey', position: { x: ctxX, y: ctxY },
+            data: { onChange: updateNodeData, onDelete: deleteNode,
+                apiKeyName: settings.api_key_name || null,
+                dataExchange: settings.data_exchange || 'okx' } });
+    }
+
+    // ── AREA 2: Strategy logic ──
+    const settingsNodes = settings.nodes || {};
+    const ordered = [];
+    const visited = new Set();
+    function collectDeps(nid) {
+        if (!nid || visited.has(nid) || !settingsNodes[nid]) return;
+        visited.add(nid);
+        const n = settingsNodes[nid];
+        if (n.left && typeof n.left === 'string') collectDeps(n.left);
+        if (n.right && typeof n.right === 'string') collectDeps(n.right);
+        ordered.push(nid);
+    }
+    if (settings.entry_node) collectDeps(settings.entry_node);
+    if (settings.exit_node) collectDeps(settings.exit_node);
+    for (const nid of Object.keys(settingsNodes)) if (!visited.has(nid)) collectDeps(nid);
+
+    // Column x-positions: each column starts after previous column's width + generous gap
+    // Using 80px gaps to account for connection handles (20px each side) + visual breathing room
+    const COL_GAP = 80;
+    const C1_X = 50;                                     // indicators / price data
+    const C2_X = C1_X + SIZE.indicator.w + COL_GAP;      // 400: conditions
+    const C3_X = C2_X + SIZE.condition.w + COL_GAP;      // 760: logic gates
+    const C4_X = C3_X + SIZE.logic.w + COL_GAP;          // 1060: actions
+    const C5_X = C4_X + SIZE.action.w + COL_GAP;         // 1480: TP / SL
+
+    const strategyY = 50 + SIZE.config.h + GAP;          // 600
+    let c1Y = strategyY, c2Y = strategyY, c3Y = strategyY;
+
+    // Compute indicator height based on param count + output line selector
+    function indicatorHeight(n) {
+        const paramCount = n.params ? Object.keys(n.params).length : 1;
+        // output_idx > 0 means multi-line indicator with dropdown selector (~60px extra)
+        const hasMultiLine = n.output_idx !== undefined && n.output_idx > 0;
+        return 140 + paramCount * 45 + (hasMultiLine ? 70 : 0);
+    }
+
+    for (const nid of ordered) {
+        const n = settingsNodes[nid];
+        const cls = n.class;
+
+        if (cls === 'indicator') {
+            const h = indicatorHeight(n);
+            nodes.push({ id: nid, type: 'indicator', position: { x: C1_X, y: c1Y },
+                data: { onChange: updateNodeData, onDelete: deleteNode,
+                    indicator: n.method || 'rsi', params: n.params || { length: 14 },
+                    outputIdx: n.output_idx ?? 0 } });
+            c1Y += h + GAP;
+        } else if (cls === 'price_data') {
+            nodes.push({ id: nid, type: 'priceData', position: { x: C1_X, y: c1Y },
+                data: { onChange: updateNodeData, onDelete: deleteNode,
+                    priceType: n.type || 'close', offset: n.offset ?? 0 } });
+            c1Y += SIZE.priceData.h + GAP;
+        } else if (cls === 'condition') {
+            const rightVal = (n.right != null && !settingsNodes[n.right]) ? String(n.right) : '';
+            nodes.push({ id: nid, type: 'condition', position: { x: C2_X, y: c2Y },
+                data: { onChange: updateNodeData, onDelete: deleteNode,
+                    operator: n.operator || '>', rightValue: rightVal } });
+            if (n.left && settingsNodes[n.left])
+                edges.push({ id: `e_${n.left}_${nid}_l`, source: n.left, target: nid, targetHandle: 'left', animated: true, style: edgeStyle });
+            if (n.right && settingsNodes[n.right])
+                edges.push({ id: `e_${n.right}_${nid}_r`, source: n.right, target: nid, targetHandle: 'right', animated: true, style: edgeStyle });
+            c2Y += SIZE.condition.h + GAP + 10;
+        } else if (cls === 'logic') {
+            nodes.push({ id: nid, type: 'logic', position: { x: C3_X, y: c3Y },
+                data: { onChange: updateNodeData, onDelete: deleteNode,
+                    logicType: n.operator || 'and' } });
+            if (n.left && settingsNodes[n.left])
+                edges.push({ id: `e_${n.left}_${nid}_1`, source: n.left, target: nid, targetHandle: 'in1', animated: true, style: edgeStyle });
+            if (n.right && settingsNodes[n.right])
+                edges.push({ id: `e_${n.right}_${nid}_2`, source: n.right, target: nid, targetHandle: 'in2', animated: true, style: edgeStyle });
+            c3Y += SIZE.logic.h + GAP;
+        }
+    }
+
+    // ── Action nodes ──
+    const entryTs = settings.trade_settings?.entry || {};
+    const entryId = 'rebuilt_entry';
+    nodes.push({ id: entryId, type: 'action', position: { x: C4_X, y: strategyY },
+        data: { onChange: updateNodeData, onDelete: deleteNode, actionType: 'buy',
+            orderType: entryTs.order_type || 'market', amountType: entryTs.amount_type || 'percentage',
+            amountValue: entryTs.amount_value ?? 100, fee: entryTs.fee ?? 0.1,
+            slippage: entryTs.slippage ?? 0.05 } });
+    if (settings.entry_node && settingsNodes[settings.entry_node])
+        edges.push({ id: `e_${settings.entry_node}_entry`, source: settings.entry_node, target: entryId, targetHandle: 'logic', animated: true, style: edgeStyle });
+
+    // TP/SL column
+    let tpslY = strategyY;
+    (entryTs.take_profits || []).forEach((tp, i) => {
+        const tpId = `rebuilt_tp_${i}`;
+        nodes.push({ id: tpId, type: 'takeProfit', position: { x: C5_X, y: tpslY },
+            data: { onChange: updateNodeData, onDelete: deleteNode,
+                triggerType: tp.type || 'percentage', triggerValue: tp.value ?? '',
+                closeType: tp.close_amount_type || 'percentage', closeValue: tp.close_amount_value ?? 100 } });
+        edges.push({ id: `e_entry_${tpId}`, source: entryId, sourceHandle: 'tp', target: tpId, animated: true, style: edgeStyle });
+        tpslY += SIZE.tp.h + GAP + 10;
+    });
+    (entryTs.stop_losses || []).forEach((sl, i) => {
+        const slId = `rebuilt_sl_${i}`;
+        nodes.push({ id: slId, type: 'stopLoss', position: { x: C5_X, y: tpslY },
+            data: { onChange: updateNodeData, onDelete: deleteNode,
+                triggerType: sl.type || 'percentage', triggerValue: sl.value ?? '',
+                closeType: sl.close_amount_type || 'percentage', closeValue: sl.close_amount_value ?? 100 } });
+        edges.push({ id: `e_entry_${slId}`, source: entryId, sourceHandle: 'sl', target: slId, animated: true, style: edgeStyle });
+        tpslY += SIZE.sl.h + GAP + 10;
+    });
+
+    // Exit action below entry
+    const exitTs = settings.trade_settings?.exit || {};
+    const exitId = 'rebuilt_exit';
+    nodes.push({ id: exitId, type: 'action', position: { x: C4_X, y: strategyY + SIZE.action.h + COL_GAP },
+        data: { onChange: updateNodeData, onDelete: deleteNode, actionType: 'sell',
+            orderType: exitTs.order_type || 'market', amountType: exitTs.amount_type || 'percentage',
+            amountValue: exitTs.amount_value ?? 100, fee: exitTs.fee ?? 0.1,
+            slippage: exitTs.slippage ?? 0.05 } });
+    if (settings.exit_node && settingsNodes[settings.exit_node])
+        edges.push({ id: `e_${settings.exit_node}_exit`, source: settings.exit_node, target: exitId, targetHandle: 'logic', animated: true, style: edgeStyle });
+
+    return { nodes, edges };
+}
+
 const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const reactFlowWrapper = useRef(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -36,8 +223,9 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
   const [availableKeys, setAvailableKeys] = useState([]);
   
   const [modalConfig, setModalConfig] = useState(null);
-  const [toolboxOpen, setToolboxOpen] = useState(false); 
-  
+  const [toolboxOpen, setToolboxOpen] = useState(false);
+  const [supportedTimeframes, setSupportedTimeframes] = useState(null);
+
   const initRef = useRef(false);
 
   const updateNodeData = useCallback((id, field, value) => {
@@ -72,17 +260,29 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
         }));
     }).catch(() => {});
 
-    if (editingBot && editingBot.settings.ui_layout) {
+    const hasLayout = editingBot && editingBot.settings.ui_layout && editingBot.settings.ui_layout.nodes && editingBot.settings.ui_layout.nodes.length > 0;
+    if (hasLayout) {
         const restoredNodes = editingBot.settings.ui_layout.nodes.map(n => ({
             ...n, data: { ...n.data, onChange: updateNodeData, onDelete: deleteNode }
         }));
         setNodes(restoredNodes);
         setEdges(editingBot.settings.ui_layout.edges || []);
         initRef.current = true;
-    } else if (!editingBot) {
+    } else if (editingBot && editingBot.settings && Object.keys(editingBot.settings.nodes || {}).length > 0) {
+        // Reconstruct visual layout from settings (imported/programmatic bot with no ui_layout)
+        const rebuilt = rebuildLayoutFromSettings(editingBot.settings, updateNodeData, deleteNode);
+        // Set the bot name on the config node
+        const cfgNode = rebuilt.nodes.find(n => n.type === 'botConfig');
+        if (cfgNode) cfgNode.data.botName = editingBot.name;
+        setNodes(rebuilt.nodes);
+        setEdges(rebuilt.edges);
+        initRef.current = true;
+    } else {
         setNodes([
-            { id: getId(), type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: 'Apex Strategy Alpha', timeframe: '1m', executionMode: 'paper', maxPositions: 1, maxPositionsScope: 'per_pair', cooldownTrades: 0, cooldownCandles: 0 } },
-            { id: getId(), type: 'whitelist', position: { x: 500, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: 'BTC/USDC' } }
+            { id: getId(), type: 'botConfig', position: { x: 50, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, botName: editingBot ? editingBot.name : 'Apex Strategy Alpha', timeframe: editingBot?.settings?.timeframe || '1m', executionMode: 'paper', maxPositions: 1, maxPositionsScope: 'per_pair', cooldownTrades: 0, cooldownCandles: 0 } },
+            { id: getId(), type: 'whitelist', position: { x: 420, y: 50 }, data: { onChange: updateNodeData, onDelete: deleteNode, pairs: editingBot?.settings?.symbols?.join(', ') || editingBot?.settings?.symbol || 'BTC/USDC' } },
+            { id: getId(), type: 'backtest', position: { x: 420, y: 240 }, data: { onChange: updateNodeData, onDelete: deleteNode, runOnStart: true, capital: 1000, lookback: 150 } },
+            { id: getId(), type: 'apiKey', position: { x: 420, y: 440 }, data: { onChange: updateNodeData, onDelete: deleteNode, apiKeyName: null, dataExchange: 'okx' } }
         ]);
         initRef.current = true;
     }
@@ -97,6 +297,33 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
           return n;
       }));
   }, [availableKeys, setNodes]);
+
+  // Derive active exchange from nodes and fetch supported timeframes
+  useEffect(() => {
+      if (!initRef.current) return;
+      const apiKeyNode = nodes.find(n => n.type === 'apiKey');
+      let exchange = apiKeyNode?.data.dataExchange || 'okx';
+      if (apiKeyNode?.data.apiKeyName) {
+          const keyRecord = availableKeys?.find(k => k.name === apiKeyNode.data.apiKeyName);
+          if (keyRecord) exchange = keyRecord.exchange;
+      }
+      apiClient.get(`/api/data/timeframes/${exchange}`).then(res => {
+          setSupportedTimeframes(res.data.timeframes);
+      }).catch(() => setSupportedTimeframes(null));
+  }, [
+      nodes.find(n => n.type === 'apiKey')?.data.apiKeyName,
+      nodes.find(n => n.type === 'apiKey')?.data.dataExchange,
+      availableKeys
+  ]);
+
+  // Pass supported timeframes to config node
+  useEffect(() => {
+      if (!initRef.current || supportedTimeframes === null) return;
+      setNodes(nds => nds.map(n => {
+          if (n.type === 'botConfig') return { ...n, data: { ...n.data, supportedTimeframes } };
+          return n;
+      }));
+  }, [supportedTimeframes, setNodes]);
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#848e9c', strokeWidth: 2 } }, eds)), [setEdges]);
   const onDragOver = useCallback((event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }, []);
@@ -360,7 +587,11 @@ const BotBuilderFlow = ({ closeBuilder, editingBot }) => {
 
     } catch (err) {
         console.error(err);
-        showError(err.response?.data?.detail || err.message);
+        const detail = err.response?.data?.detail;
+        const msg = typeof detail === 'string' ? detail
+            : detail?.validation_errors ? detail.validation_errors.join('\n')
+            : err.message;
+        showError(msg);
     }
   };
 

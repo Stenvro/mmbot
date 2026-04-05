@@ -24,11 +24,11 @@ The flow is always: **Indicator/Price Data --> Condition --> Logic Gate (optiona
 
 **Main Configuration**
 - Algorithm name
-- Data interval: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`
+- Data interval: depends on the selected exchange (e.g. OKX supports `1m` through `3M`; Coinbase supports `1m`, `5m`, `15m`, `30m`, `1h`, `2h`, `6h`, `1d`). The timeframe dropdown updates automatically when you change the exchange.
 - Max positions: number of concurrent open positions allowed
 - Position limit scope: `per_pair` (e.g. 1x BTC + 1x ETH) or `global` (total across all pairs)
 - Cooldown: max N new entries per X candles (0 = off)
-- Max drawdown %: auto-stops bot when equity drawdown from peak exceeds threshold (0 = off). Checked separately for backtest (stops before going live) and live modes. Calculated as `(peak_equity - current_equity) / peak_equity * 100` where equity = starting capital + cumulative P&L
+- Max drawdown %: evaluated after the full backtest completes — if exceeded, the bot is stopped and not allowed to go live (0 = off). During live trading, checked after every closed position. Calculated as `(peak_equity - current_equity) / peak_equity * 100` where equity = starting capital + cumulative P&L
 - Max order value USD: rejects live orders above this dollar amount (0 = off)
 - Execution mode: `Paper Trading` (simulated) or `Live Exchange` (real orders)
 
@@ -277,3 +277,253 @@ The AI should respond with:
 - **Ask for multiple timeframe confirmation** — e.g. "only enter if the 1h trend is up" (requires multiple bots or manual confirmation, since each bot uses one timeframe)
 - **Request the exact wiring** — ask the AI to describe which node connects to which input (left/right, in1/in2, logic/tp/sl)
 - **Specify the exchange** — if not using an API key, mention which exchange to pull data from (OKX, Binance, Kraken, etc.)
+- **Timeframes are exchange-specific** — Coinbase does NOT support `4h` (use `6h` or `2h`). OKX and Binance support `4h`. Always check the exchange's supported timeframes.
+
+---
+
+## Bot Import File Format (`.apex.json`)
+
+AI assistants can generate `.apex.json` files that users import directly into ApexAlgo. The format must match exactly.
+
+### File Structure
+
+```json
+{
+  "apex_version": "1.0",
+  "exported_at": "2026-04-05T12:00:00Z",
+  "bot": {
+    "name": "Strategy Name",
+    "is_sandbox": true,
+    "strategy": "node_evaluator",
+    "settings": {
+      "symbol": "BTC/USDC",
+      "symbols": ["BTC/USDC", "ETH/USDC"],
+      "timeframe": "1h",
+      "max_positions": 1,
+      "max_positions_scope": "per_pair",
+      "cooldown_trades": 0,
+      "cooldown_candles": 0,
+      "max_drawdown": 0,
+      "max_order_value": 0,
+      "api_execution": false,
+      "backtest_on_start": true,
+      "backtest_capital": 1000,
+      "backtest_lookback": 500,
+      "api_key_name": null,
+      "data_exchange": "okx",
+      "trade_settings": { ... },
+      "nodes": { ... },
+      "ui_layout": { "nodes": [], "edges": [] },
+      "entry_node": "node_id_ref",
+      "exit_node": "node_id_ref"
+    }
+  }
+}
+```
+
+### Settings Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | string | Primary symbol (first in whitelist) |
+| `symbols` | string[] | All trading pairs |
+| `timeframe` | string | Candle interval — must be supported by `data_exchange` |
+| `max_positions` | int | Max concurrent open positions (>= 1) |
+| `max_positions_scope` | `"per_pair"` or `"global"` | Position limit scope |
+| `cooldown_trades` | int | Max new entries per cooldown window (0 = off) |
+| `cooldown_candles` | int | Cooldown window size in candles |
+| `max_drawdown` | number | Auto-stop threshold in % (0 = off) |
+| `max_order_value` | number | Max USD per live order (0 = off) |
+| `api_execution` | bool | `true` for live/paper via API key |
+| `backtest_on_start` | bool | Run backtest when bot starts |
+| `backtest_capital` | number | Starting capital for backtest (USD) |
+| `backtest_lookback` | int | Number of historical candles to backtest |
+| `api_key_name` | string/null | Name of saved API key (null = no key) |
+| `data_exchange` | string | Exchange for market data: `okx`, `binance`, `bitvavo`, `coinbase`, `cryptocom`, `kraken`, `kucoin` |
+
+### Exchange Timeframe Compatibility
+
+Not all exchanges support all timeframes. The system validates this on import.
+
+| Exchange | Supported Timeframes |
+|----------|---------------------|
+| OKX | `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `12h`, `1d`, `1w`, `1M` |
+| Binance | `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `8h`, `12h`, `1d`, `3d`, `1w`, `1M` |
+| Coinbase | `1m`, `5m`, `15m`, `30m`, `1h`, `2h`, `6h`, `1d` |
+| Kraken | `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, `1w` |
+| Bitvavo | `1m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `8h`, `12h`, `1d` |
+| KuCoin | `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `8h`, `12h`, `1d`, `1w` |
+
+### Node Definitions (`settings.nodes`)
+
+Each node has a unique ID (key) and a definition object. Nodes reference each other by ID.
+
+**Indicator node:**
+```json
+"n_rsi": {
+  "class": "indicator",
+  "method": "rsi",
+  "params": { "length": 14 },
+  "output_idx": 0
+}
+```
+- `method`: indicator key from the tables above (e.g. `rsi`, `ema`, `bbands`, `supertrend`)
+- `params`: parameter object matching the indicator's parameter IDs and values
+- `output_idx`: which output line to use (0 = first line). For multi-line indicators like MACD (3 lines) or Bollinger Bands (5 lines), this selects which line feeds into conditions.
+
+**Price data node:**
+```json
+"n_close": {
+  "class": "price_data",
+  "type": "close",
+  "offset": 0
+}
+```
+- `type`: `open`, `high`, `low`, `close`, or `volume`
+- `offset`: `0` = current candle, `-1` = previous candle, etc.
+
+**Condition node:**
+```json
+"c_uptrend": {
+  "class": "condition",
+  "left": "n_close",
+  "operator": ">",
+  "right": "n_ema200"
+}
+```
+- `left`: node ID reference (Input A)
+- `operator`: comparison operator (see operator table above)
+- `right`: node ID reference (Input B) OR a static number (e.g. `30`, `70`, `-1`)
+
+**Logic gate node:**
+```json
+"g_entry": {
+  "class": "logic",
+  "operator": "and",
+  "left": "c_uptrend",
+  "right": "c_oversold"
+}
+```
+- `operator`: `and`, `or`, `xor`, `nand`, `nor`, `not`
+- `left`/`right`: node ID references. For `not`, only `left` is used.
+- Logic gates can reference other logic gates for complex chains.
+
+### Trade Settings (`settings.trade_settings`)
+
+```json
+"trade_settings": {
+  "entry": {
+    "order_type": "market",
+    "amount_type": "percentage",
+    "amount_value": 25,
+    "fee": 0.06,
+    "slippage": 0.025,
+    "take_profits": [
+      { "type": "percentage", "value": 4.0, "close_amount_type": "percentage", "close_amount_value": 50 },
+      { "type": "percentage", "value": 8.0, "close_amount_type": "percentage", "close_amount_value": 100 }
+    ],
+    "stop_losses": [
+      { "type": "trailing", "value": 2.0, "close_amount_type": "percentage", "close_amount_value": 100 }
+    ]
+  },
+  "exit": {
+    "order_type": "market",
+    "amount_type": "percentage",
+    "amount_value": 100,
+    "fee": 0.06,
+    "slippage": 0.025
+  }
+}
+```
+
+- `amount_type`: `"percentage"` (% of capital) or `"fixed"` (fixed USD)
+- `fee`/`slippage`: percentages as decimals (0.06 = 0.06%)
+- TP/SL `type`: `"percentage"`, `"trailing"`, `"atr"`, or `"fixed"`
+- TP/SL `close_amount_type`: `"percentage"` or `"fixed"`
+
+### Entry/Exit Node References
+
+```json
+"entry_node": "g_entry",
+"exit_node": "c_overbought"
+```
+
+These point to the final node in the logic chain that triggers the BUY/SELL action. The entry_node feeds into the BUY action, exit_node into the SELL action.
+
+### UI Layout
+
+```json
+"ui_layout": { "nodes": [], "edges": [] }
+```
+
+Set to empty arrays for programmatic/AI-generated bots. ApexAlgo automatically reconstructs the visual layout when opening the editor. If you export a bot that was built in the visual editor, this field contains the full ReactFlow node positions and edge connections.
+
+### Complete Example: RSI Oversold + EMA Trend Filter
+
+```json
+{
+  "apex_version": "1.0",
+  "exported_at": "2026-04-05T12:00:00Z",
+  "bot": {
+    "name": "RSI Oversold Trend Entry",
+    "is_sandbox": true,
+    "strategy": "node_evaluator",
+    "settings": {
+      "symbol": "BTC/USDC",
+      "symbols": ["BTC/USDC", "ETH/USDC"],
+      "timeframe": "1h",
+      "max_positions": 1,
+      "max_positions_scope": "per_pair",
+      "cooldown_trades": 1,
+      "cooldown_candles": 4,
+      "max_drawdown": 10,
+      "max_order_value": 0,
+      "api_execution": false,
+      "backtest_on_start": true,
+      "backtest_capital": 1000,
+      "backtest_lookback": 5000,
+      "api_key_name": null,
+      "data_exchange": "coinbase",
+      "trade_settings": {
+        "entry": {
+          "order_type": "market",
+          "amount_type": "percentage",
+          "amount_value": 25,
+          "fee": 0.06,
+          "slippage": 0.025,
+          "take_profits": [
+            { "type": "percentage", "value": 3.0, "close_amount_type": "percentage", "close_amount_value": 50 },
+            { "type": "percentage", "value": 6.0, "close_amount_type": "percentage", "close_amount_value": 100 }
+          ],
+          "stop_losses": [
+            { "type": "trailing", "value": 2.0, "close_amount_type": "percentage", "close_amount_value": 100 }
+          ]
+        },
+        "exit": {
+          "order_type": "market",
+          "amount_type": "percentage",
+          "amount_value": 100,
+          "fee": 0.06,
+          "slippage": 0.025
+        }
+      },
+      "nodes": {
+        "n_ema200": { "class": "indicator", "method": "ema", "params": { "length": 200 }, "output_idx": 0 },
+        "n_rsi": { "class": "indicator", "method": "rsi", "params": { "length": 14 }, "output_idx": 0 },
+        "n_close": { "class": "price_data", "type": "close", "offset": 0 },
+        "c_uptrend": { "class": "condition", "left": "n_close", "operator": ">", "right": "n_ema200" },
+        "c_oversold": { "class": "condition", "left": "n_rsi", "operator": "<", "right": 30 },
+        "g_entry": { "class": "logic", "operator": "and", "left": "c_uptrend", "right": "c_oversold" },
+        "c_overbought": { "class": "condition", "left": "n_rsi", "operator": ">", "right": 70 }
+      },
+      "ui_layout": { "nodes": [], "edges": [] },
+      "entry_node": "g_entry",
+      "exit_node": "c_overbought"
+    }
+  }
+}
+```
+
+**Logic flow:**
+- Entry: Price > EMA(200) AND RSI(14) < 30 → BUY 25% of capital → TP1 at 3% (close 50%), TP2 at 6% (close 100%) → SL trailing 2%
+- Exit: RSI(14) > 70 → SELL 100% of position

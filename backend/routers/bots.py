@@ -21,6 +21,17 @@ from backend.engine.settings_validator import validate_bot_settings
 from backend.engine.bot_manager import bot_manager
 from backend.core import bot_log_buffer as blb
 from backend.models.bot_logs import BotLog
+from backend.models.exchange_keys import ExchangeKey
+
+
+def _resolve_exchange(settings: dict, db: Session) -> str:
+    """Resolve the effective exchange for a bot's settings."""
+    api_key_name = settings.get("api_key_name")
+    if api_key_name:
+        key = db.query(ExchangeKey).filter(ExchangeKey.name == api_key_name).first()
+        if key:
+            return key.exchange
+    return settings.get("data_exchange", "okx")
 
 logger = logging.getLogger("apexalgo.bots")
 
@@ -127,7 +138,8 @@ def create_bot(bot_in: BotCreate, db: Session = Depends(get_db)):
     if existing_bot:
         raise HTTPException(status_code=400, detail="A bot with this name already exists.")
 
-    validation = validate_bot_settings(bot_in.settings)
+    resolved_exchange = _resolve_exchange(bot_in.settings, db)
+    validation = validate_bot_settings(bot_in.settings, exchange_id=resolved_exchange)
     if validation["errors"]:
         raise HTTPException(status_code=400, detail={"validation_errors": validation["errors"]})
 
@@ -164,7 +176,9 @@ def import_bot(payload: dict = Body(...), db: Session = Depends(get_db)):
     if db.query(BotConfig).filter(BotConfig.name == name).first():
         name = f"{name} (imported)"
 
-    validation = validate_bot_settings(bot_data.get("settings", {}))
+    bot_settings = bot_data.get("settings", {})
+    resolved_exchange = _resolve_exchange(bot_settings, db)
+    validation = validate_bot_settings(bot_settings, exchange_id=resolved_exchange)
     if validation["errors"]:
         raise HTTPException(status_code=400, detail={"validation_errors": validation["errors"]})
 
@@ -215,7 +229,8 @@ async def update_bot(bot_id: int, bot_data: dict = Body(...), db: Session = Depe
         for key, value in bot_data["settings"].items():
             current_settings[key] = value
 
-        validation = validate_bot_settings(current_settings)
+        resolved_exchange = _resolve_exchange(current_settings, db)
+        validation = validate_bot_settings(current_settings, exchange_id=resolved_exchange)
         if validation["errors"]:
             raise HTTPException(status_code=400, detail={"validation_errors": validation["errors"]})
         validation_warnings = validation["warnings"]

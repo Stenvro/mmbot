@@ -323,9 +323,7 @@ class BotManager:
             # Shared capital pool across ALL symbols for this bot
             bt_starting_capital = float(bot.settings.get("backtest_capital", 1000))
             bt_equity = bt_starting_capital  # Available cash (not locked in positions)
-            bt_max_dd_pct = float(bot.settings.get("max_drawdown", 0))
             bt_peak_equity = bt_starting_capital
-            bt_halted = False  # Set True when max drawdown or capital depletion stops the backtest
 
             for symbol in symbols:
                 blb.push(bot.name, "INFO", f"Starting: {symbol} | {timeframe} | {live_mode} | lookback={lookback_limit}")
@@ -381,7 +379,7 @@ class BotManager:
 
                         if current_count == last_count:
                             stable_checks += 1
-                            if stable_checks >= 3:  # 6 seconds of no change — backfill done
+                            if stable_checks >= 5:  # 10 seconds of no change — backfill done
                                 break
                         else:
                             stable_checks = 0
@@ -390,7 +388,9 @@ class BotManager:
 
                 final_count = _count_candles()
                 logger.info("Data available for %s: %d candles.", symbol, final_count)
-                if final_count < lookback_limit and final_count > 0:
+                if final_count == 0:
+                    blb.push(bot.name, "WARN", f"No candle data for {symbol} on {exchange_name} ({timeframe}). This exchange may not support the '{timeframe}' timeframe.")
+                elif final_count < lookback_limit:
                     blb.push(bot.name, "INFO", f"Historical data ready: {symbol} ({final_count}/{lookback_limit} requested)")
                 else:
                     blb.push(bot.name, "INFO", f"Historical data ready: {symbol} ({final_count} candles)")
@@ -484,7 +484,7 @@ class BotManager:
 
                     if run_backtest and (last_bt_ts is None or ts > last_bt_ts):
                         # Capital depletion / max drawdown halt
-                        if bt_halted or bt_equity <= 0:
+                        if bt_equity <= 0:
                             pass  # Skip trading logic, still generate signals below
                         else:
                             max_pos = int(bot.settings.get("max_positions", 1))
@@ -559,38 +559,6 @@ class BotManager:
                                     else:
                                         open_bt_pos.amount -= close_qty
 
-                                # Max drawdown check after exits — halt backtest if exceeded
-                                if bt_max_dd_pct > 0 and not bt_halted:
-                                    open_pos_value = (open_bt_pos.amount * current_price) if open_bt_pos else 0
-                                    total_equity = bt_equity + open_pos_value
-                                    if total_equity > bt_peak_equity:
-                                        bt_peak_equity = total_equity
-                                    if bt_peak_equity > 0:
-                                        current_dd = ((bt_peak_equity - total_equity) / bt_peak_equity) * 100
-                                        if current_dd >= bt_max_dd_pct:
-                                            blb.push(bot.name, "INFO", f"Backtest halted: {symbol} | drawdown {current_dd:.1f}% >= {bt_max_dd_pct}%")
-                                            # Force close open position
-                                            if open_bt_pos:
-                                                remaining = open_bt_pos.amount
-                                                close_price = current_price * (1 - bt_exit_slippage)
-                                                e_cost = open_bt_pos.entry_price * remaining * (1 + bt_entry_fee)
-                                                e_proceeds = close_price * remaining * (1 - bt_exit_fee)
-                                                final_pnl = e_proceeds - e_cost
-                                                open_bt_pos.profit_abs = (open_bt_pos.profit_abs or 0.0) + final_pnl
-                                                if original_amount and original_amount > 0:
-                                                    p_pct = (final_pnl / e_cost) * 100 if e_cost > 0 else 0.0
-                                                    w = remaining / original_amount
-                                                    open_bt_pos.profit_pct = (open_bt_pos.profit_pct or 0.0) + (p_pct * w)
-                                                open_bt_pos.status = "closed"
-                                                open_bt_pos.closed_at = ts
-                                                bt_equity += e_proceeds
-                                                db.add(Order(position_id=open_bt_pos.id, exchange=exchange_name, bot_name=bot.name, mode="backtest", symbol=symbol, side="sell", order_type="market", price=close_price, amount=remaining, timestamp=ts, status="filled", fee=close_price * remaining * bt_exit_fee))
-                                                if open_bt_pos.id in self.position_states:
-                                                    del self.position_states[open_bt_pos.id]
-                                                open_bt_pos = None
-                                                original_amount = None
-                                            bt_halted = True
-
                     if ts not in existing_timestamps:
                         indicators = { col: float(row[col]) for col in indicator_cols if not pd.isna(row[col]) }
                         if indicators:
@@ -646,7 +614,7 @@ class BotManager:
                 trade_count = len(trade_entry_indices) if run_backtest else 0
                 logger.info("Backfill complete: '%s' on %s | mode=%s | %d candles | %d trades | equity=$%.2f", bot.name, symbol, live_mode.upper(), len(df), trade_count, bt_equity)
                 if run_backtest:
-                    blb.push(bot.name, "INFO", f"Backtest complete: {symbol} | {len(df)} candles | {trade_count} trades | equity=${bt_equity:.2f}{' [HALTED]' if bt_halted else ''}")
+                    blb.push(bot.name, "INFO", f"Backtest complete: {symbol} | {len(df)} candles | {trade_count} trades | equity=${bt_equity:.2f}")
                 else:
                     blb.push(bot.name, "INFO", f"Ready: {symbol} | {len(df)} candles | mode={live_mode.upper()}")
 
@@ -659,7 +627,7 @@ class BotManager:
                     bt_dd = self._get_drawdown(bot.name, db, mode_group="backtest", starting_capital=bt_capital)
                     if bt_dd["max_dd"] >= max_drawdown_pct:
                         logger.warning("Bot '%s' backtest drawdown (%.2f%%) exceeds max (%.2f%%), stopping before live", bot.name, bt_dd["max_dd"], max_drawdown_pct)
-                        blb.push(bot.name, "WARN", f"Backtest drawdown {bt_dd['max_dd']:.2f}% >= {max_drawdown_pct:.2f}%, auto-stopping before live")
+                        blb.push(bot.name, "WARN", f"Backtest max drawdown {bt_dd['max_dd']:.2f}% >= {max_drawdown_pct:.2f}%, bot stopped — not allowed to go live")
                         bot.is_active = False
                         db.commit()
                         return

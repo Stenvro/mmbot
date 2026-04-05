@@ -67,9 +67,11 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **Shared Capital Pool** — `backtest_capital` is a single pool shared across all whitelist pairs. When BTC uses $140, only the remainder is available for ETH/SOL/XRP. Capital is locked on position open and sale proceeds returned on close
 - **Dynamic Trade Sizing** — trade amounts are calculated from running equity, not static starting capital. As capital depletes, position sizes shrink proportionally. Trading halts when equity reaches zero
 - **Capital Depletion Guard** — before opening any position, the engine verifies sufficient capital. No phantom-money trades
-- **Real-Time Max Drawdown Enforcement** — drawdown is checked inside the backtest loop after every exit. When the threshold is exceeded, the backtest immediately halts: open positions are force-closed and remaining candles are skipped
+- **Post-Backtest Drawdown Gate** — backtest always runs to completion; max drawdown is evaluated over all closed positions afterward. If the threshold is exceeded, the bot is stopped and not allowed to go live
 - **Vectorized Historical Evaluation** — fast backtest over configurable lookback periods with numpy-backed arrays
-- **Stable Backfill Detection** — waits for 3 consecutive stable candle counts (6 seconds) before proceeding, preventing premature backtest starts when exchange data is still loading
+- **Stable Backfill Detection** — waits for 5 consecutive stable candle counts (10 seconds) before proceeding, preventing premature backtest starts when exchange data is still loading
+- **Backfill Retry Logic** — transient API errors during backfill are retried up to 3 times with exponential backoff; per-thread exchange instances prevent shared rate-limit interference
+- **Exchange Timeframe Validation** — unsupported timeframes are detected before backfill/polling; a clear warning is shown when a timeframe isn't available on the selected exchange
 - **Adaptive Lookback** — if the exchange has fewer candles than requested (e.g. 5,000 available vs. 50,000 requested), the backtest runs on whatever is available (minimum 20 candles required)
 - **Fee-Adjusted P&L** — entry/exit fees and slippage applied to all profit calculations; computed fee amounts are stored on each Order record so the analytics page can report accurate total fees paid
 - **Automatic Position Closure** — open positions at backtest end are closed at last price with proper P&L
@@ -79,7 +81,7 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **ATR & Trailing Stops** — dynamic stop-loss adjustment based on price action
 - **Trade Cooldown** — configurable max entries per N candles
 - **Position Limits** — per-pair or global max concurrent positions
-- **Max Drawdown Auto-Stop** — halts bot when equity drawdown from peak exceeds threshold. Enforced in real-time during backtest (per-candle check with immediate halt) and during live processing (per-candle-close check)
+- **Max Drawdown Auto-Stop** — evaluated after full backtest to gate live entry; during live trading, checked after every closed position. Stops the bot when equity drawdown from peak exceeds the configured threshold
 - **Max Order Value Guard** — rejects live orders exceeding a configurable USD limit
 
 ### Order Safety
@@ -419,7 +421,7 @@ Click **Export** on any bot card to download a `.apex.json` file containing the 
 ```
 
 ### Import
-Click **Import Bot** in the page header and select a `.apex.json` file. If the bot name already exists, `(imported)` is appended automatically.
+Click **Import Bot** in the page header and select a `.apex.json` file. If the bot name already exists, `(imported)` is appended automatically. Bots imported without visual layout data (e.g. programmatically created) have their node graph automatically reconstructed in the editor.
 
 ### Duplicate
 Click **Duplicate** on any stopped bot card to create a clone with `(copy)` appended to the name. The duplicate starts inactive with no trade history.

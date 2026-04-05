@@ -81,6 +81,28 @@ def build_exchange(
     return exchange
 
 
+# Cache for exchange timeframes (loaded once per exchange, reused)
+_timeframe_cache: dict[str, dict[str, str]] = {}
+
+
+def get_exchange_timeframes(exchange_id: str) -> dict[str, str]:
+    """Return {timeframe_key: label} for the exchange. Cached after first call."""
+    exchange_id = exchange_id.lower()
+    if exchange_id in _timeframe_cache:
+        return _timeframe_cache[exchange_id]
+
+    try:
+        exchange = build_exchange(exchange_id)
+        exchange.load_markets()
+        tf_map = dict(exchange.timeframes) if exchange.timeframes else {}
+    except Exception as exc:
+        logger.warning("Failed to load timeframes for '%s': %s", exchange_id, exc)
+        tf_map = {}
+
+    _timeframe_cache[exchange_id] = tf_map
+    return tf_map
+
+
 def build_exchange_from_key(key_record) -> ccxt.Exchange:
     """
     Convenience wrapper: build an authenticated exchange instance

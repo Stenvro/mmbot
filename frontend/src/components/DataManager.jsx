@@ -14,6 +14,7 @@ export default function DataManager({ openChart, setError }) {
   const [timeframe, setTimeframe] = useState('1d');
   const [startDate, setStartDate] = useState('2024-01-01T00:00');
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 16));
+  const [exchangeTimeframes, setExchangeTimeframes] = useState(null);
 
   const EXCHANGES = [
     { id: 'okx', name: 'OKX' },
@@ -48,6 +49,17 @@ export default function DataManager({ openChart, setError }) {
     fetchSummary(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
     return () => controller.abort();
   }, [fetchSummary]);
+
+  // Fetch supported timeframes when exchange changes
+  useEffect(() => {
+    apiClient.get(`/api/data/timeframes/${exchange}`).then(res => {
+      setExchangeTimeframes(res.data.timeframes);
+      // Reset timeframe if current one isn't supported
+      if (res.data.timeframes && !res.data.timeframes.includes(timeframe)) {
+        setTimeframe(res.data.timeframes.includes('1d') ? '1d' : res.data.timeframes[0] || '1d');
+      }
+    }).catch(() => setExchangeTimeframes(null));
+  }, [exchange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilterSymbol = useCallback((val) => {
       setFilterSymbol(val);
@@ -249,9 +261,13 @@ export default function DataManager({ openChart, setError }) {
             <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">Asset Pair</label>
             <input type="text" required value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())} className={inputClass} />
           </div>
-          <div className="w-20 md:w-24">
+          <div className="w-24 md:w-28">
             <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">Interval</label>
-            <input type="text" required value={timeframe} onChange={e => setTimeframe(e.target.value)} className={inputClass} />
+            <select required value={timeframe} onChange={e => setTimeframe(e.target.value)} className={inputClass}>
+              {(exchangeTimeframes || ['1m','5m','15m','1h','4h','1d']).map(tf => (
+                <option key={tf} value={tf}>{tf}</option>
+              ))}
+            </select>
           </div>
           <div className="flex-1 min-w-[150px]">
             <label className="block text-[9px] font-bold uppercase text-[#848e9c] mb-1.5">Start Date</label>

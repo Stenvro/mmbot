@@ -2,9 +2,9 @@ import logging
 import pandas as pd
 import pandas_ta_classic  # noqa: F401 — registers .ta accessor on DataFrame
 
-logger = logging.getLogger("apexalgo.settings_validator")
+from backend.core.exchange_registry import get_exchange_timeframes
 
-VALID_TIMEFRAMES = {'1m', '5m', '15m', '1h', '4h', '1d'}
+logger = logging.getLogger("apexalgo.settings_validator")
 VALID_EXIT_TYPES = {'percentage', 'trailing', 'atr', 'fixed'}
 VALID_AMOUNT_TYPES = {'percentage', 'fixed'}
 VALID_CLOSE_AMOUNT_TYPES = {'percentage', 'fixed'}
@@ -13,8 +13,16 @@ VALID_LOGIC_OPS = {'and', 'or', 'xor', 'nand', 'nor', 'not'}
 VALID_PRICE_TYPES = {'open', 'high', 'low', 'close', 'volume'}
 
 
-def validate_bot_settings(settings: dict) -> dict:
+def validate_bot_settings(settings: dict, exchange_id: str | None = None) -> dict:
     """Validate bot settings and return errors and warnings.
+
+    Parameters
+    ----------
+    settings : dict
+        Bot settings to validate.
+    exchange_id : str, optional
+        Resolved exchange ID for timeframe validation. Falls back to
+        settings['data_exchange'] or 'okx' if not provided.
 
     Returns dict with 'errors' (list of blocking issues) and
     'warnings' (list of non-blocking issues).
@@ -31,10 +39,13 @@ def validate_bot_settings(settings: dict) -> dict:
         else:
             errors.append("No trading symbols configured.")
 
-    # Timeframe
+    # Timeframe — validated against the exchange's supported timeframes
     tf = settings.get("timeframe")
-    if tf and tf not in VALID_TIMEFRAMES:
-        errors.append(f"Invalid timeframe '{tf}'. Valid: {', '.join(sorted(VALID_TIMEFRAMES))}")
+    if tf:
+        eid = exchange_id or settings.get("data_exchange", "okx")
+        supported = get_exchange_timeframes(eid)
+        if supported and tf not in supported:
+            errors.append(f"Exchange '{eid}' does not support timeframe '{tf}'. Supported: {', '.join(sorted(supported.keys()))}")
 
     # Entry/exit node references
     entry_node = settings.get("entry_node")

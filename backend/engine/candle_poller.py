@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from backend.core.database import SessionLocal
-from backend.core.exchange_registry import build_exchange
+from backend.core.exchange_registry import build_exchange, get_exchange_timeframes
 from backend.core.events import event_bus
 from backend.models.bots import BotConfig
 from backend.models.candles import Candle
@@ -152,7 +152,22 @@ class CandlePoller:
         timeframe: str,
         lookback_limit: int,
     ):
-        exchange = self._get_public_exchange(exchange_name)
+        # Fresh instance per thread to avoid shared rate-limit state
+        exchange = build_exchange(exchange_name)
+
+        # Validate timeframe before attempting fetch
+        try:
+            exchange.load_markets()
+        except Exception:
+            pass
+        if exchange.timeframes and timeframe not in exchange.timeframes:
+            supported = ', '.join(sorted(exchange.timeframes.keys()))
+            logger.warning(
+                "Back-fill skipped: %s does not support timeframe '%s'. Supported: %s",
+                exchange_name, timeframe, supported,
+            )
+            return
+
         logger.info(
             "Back-fill: %s/%s/%s — requesting up to %d candles.",
             exchange_name, symbol, timeframe, lookback_limit,
@@ -172,14 +187,45 @@ class CandlePoller:
         db: Session = SessionLocal()
         try:
             while total_saved < lookback_limit:
-                try:
-                    batch = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=500)
-                except Exception as exc:
-                    logger.warning("Back-fill fetch error %s/%s/%s: %s", exchange_name, symbol, timeframe, exc)
-                    break
+                batch = None
+                for attempt in range(3):
+                    try:
+                        batch = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=500)
+                        break
+                    except Exception as exc:
+                        if attempt < 2:
+                            logger.warning("Back-fill fetch error %s/%s/%s (attempt %d/3): %s", exchange_name, symbol, timeframe, attempt + 1, exc)
+                            time.sleep(1 * (attempt + 1))
+                        else:
+                            logger.warning("Back-fill fetch failed after 3 attempts %s/%s/%s: %s", exchange_name, symbol, timeframe, exc)
 
                 if not batch:
-                    break
+                    if total_saved == 0 and current_since == start_ts:
+                        # First fetch returned empty — the pair may not have data that far back.
+                        # Step forward in large jumps to find where data actually begins.
+                        found_start = None
+                        probe_since = start_ts
+                        jump = (now_ms - start_ts) // 4  # quarter-jumps toward present
+                        while probe_since < now_ms:
+                            probe_since += jump
+                            try:
+                                probe = exchange.fetch_ohlcv(symbol, timeframe, since=probe_since, limit=10)
+                            except Exception:
+                                probe = None
+                            time.sleep(0.35)
+                            if probe:
+                                found_start = int(probe[0][0])
+                                break
+                        if found_start:
+                            logger.info("Back-fill: %s/%s/%s — no data at requested start, found data from %s.",
+                                exchange_name, symbol, timeframe,
+                                datetime.fromtimestamp(found_start / 1000.0, tz=timezone.utc).strftime('%Y-%m-%d'))
+                            current_since = found_start
+                            continue
+                        else:
+                            break
+                    else:
+                        break
 
                 # Deduplicate against DB for this batch's time range
                 batch_start = datetime.fromtimestamp(int(batch[0][0]) / 1000.0, tz=timezone.utc)
@@ -226,7 +272,7 @@ class CandlePoller:
                     break
 
                 current_since = last_ts + 1
-                time.sleep(0.2)
+                time.sleep(0.35)
 
             if total_saved > 0:
                 logger.info(
@@ -272,6 +318,15 @@ class CandlePoller:
         closed candle.
         """
         exchange = self._get_public_exchange(exchange_name)
+
+        # Validate timeframe
+        try:
+            await asyncio.to_thread(exchange.load_markets)
+        except Exception:
+            pass
+        if exchange.timeframes and timeframe not in exchange.timeframes:
+            logger.warning("Poll skipped: %s does not support timeframe '%s'.", exchange_name, timeframe)
+            return
         try:
             tf_seconds = exchange.parse_timeframe(timeframe)
         except Exception:

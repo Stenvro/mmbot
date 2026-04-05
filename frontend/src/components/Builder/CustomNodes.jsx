@@ -1,6 +1,23 @@
 import React from 'react';
 import { Handle, Position } from 'reactflow';
 
+// All known timeframes with display labels
+const ALL_TIMEFRAMES = [
+  { value: '1m', label: '1 Minute' },
+  { value: '3m', label: '3 Minutes' },
+  { value: '5m', label: '5 Minutes' },
+  { value: '15m', label: '15 Minutes' },
+  { value: '30m', label: '30 Minutes' },
+  { value: '1h', label: '1 Hour' },
+  { value: '2h', label: '2 Hours' },
+  { value: '4h', label: '4 Hours' },
+  { value: '6h', label: '6 Hours' },
+  { value: '12h', label: '12 Hours' },
+  { value: '1d', label: '1 Day' },
+  { value: '1w', label: '1 Week' },
+  { value: '1M', label: '1 Month' },
+];
+
 // ==========================================
 // 1. INDICATOR DEFINITIONS
 // scale: "overlay" = on price chart, "oscillator" = separate pane (0-100 or centered), "volume" = volume pane
@@ -120,12 +137,12 @@ export const BotConfigNode = ({ id, data }) => (
         <div className="w-1/2">
             <label className="text-[10px] text-[#848e9c] font-bold uppercase mb-1.5 block">Data Interval</label>
             <select className="w-full bg-[#12151c] border border-[#202532] text-[#eaecef] text-xs rounded p-2 nodrag focus:border-[#8b5cf6] outline-none" value={data.timeframe !== undefined ? data.timeframe : "1m"} onChange={(e) => data.onChange(id, 'timeframe', e.target.value)}>
-                <option value="1m">1 Minute</option>
-                <option value="5m">5 Minutes</option>
-                <option value="15m">15 Minutes</option>
-                <option value="1h">1 Hour</option>
-                <option value="4h">4 Hours</option>
-                <option value="1d">1 Day</option>
+                {(data.supportedTimeframes
+                    ? ALL_TIMEFRAMES.filter(tf => data.supportedTimeframes.includes(tf.value))
+                    : ALL_TIMEFRAMES
+                ).map(tf => (
+                    <option key={tf.value} value={tf.value}>{tf.label}</option>
+                ))}
             </select>
         </div>
         <div className="w-1/2">

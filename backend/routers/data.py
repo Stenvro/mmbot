@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from backend.core.database import get_db, SessionLocal
 from backend.models.candles import Candle
 from backend.core.security import verify_api_key
-from backend.core.exchange_registry import build_exchange, SUPPORTED_EXCHANGES
+from backend.core.exchange_registry import build_exchange, SUPPORTED_EXCHANGES, get_exchange_timeframes
 
 logger = logging.getLogger("apexalgo.data")
 
@@ -25,6 +25,16 @@ router = APIRouter(
     tags=["Market Data"],
     dependencies=[Depends(verify_api_key)]
 )
+
+
+@router.get("/timeframes/{exchange_id}")
+async def get_timeframes(exchange_id: str):
+    """Return supported timeframes for an exchange."""
+    exchange_id = exchange_id.lower()
+    if exchange_id not in SUPPORTED_EXCHANGES:
+        raise HTTPException(status_code=400, detail=f"Unknown exchange '{exchange_id}'.")
+    tf_map = await asyncio.to_thread(get_exchange_timeframes, exchange_id)
+    return {"exchange": exchange_id, "timeframes": list(tf_map.keys())}
 
 
 class HistoricalDataFetch(BaseModel):
@@ -47,6 +57,15 @@ async def fetch_historical_data(
         )
     if not req.timeframe:
         raise HTTPException(status_code=400, detail="timeframe is required.")
+
+    # Validate timeframe is supported by the exchange
+    tf_map = await asyncio.to_thread(get_exchange_timeframes, exchange_id)
+    if tf_map and req.timeframe not in tf_map:
+        supported = ', '.join(sorted(tf_map.keys()))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Exchange '{exchange_id}' does not support timeframe '{req.timeframe}'. Supported: {supported}"
+        )
     try:
         formatted_symbol = symbol.replace('-', '/').upper()
         result = await asyncio.to_thread(_fetch_and_save_data, formatted_symbol, exchange_id, req)
@@ -92,6 +111,24 @@ def _fetch_and_save_data(formatted_symbol: str, exchange_id: str, req: Historica
                 break
 
             if not batch:
+                if total_fetched == 0 and current_since == start_ts:
+                    # No data at requested start — jump forward to find where data begins
+                    found = False
+                    probe_since = start_ts
+                    jump = (end_ts - start_ts) // 4
+                    while probe_since < end_ts:
+                        probe_since += jump
+                        try:
+                            probe = exch.fetch_ohlcv(formatted_symbol, req.timeframe, since=probe_since, limit=10)
+                        except Exception:
+                            probe = None
+                        time.sleep(0.35)
+                        if probe:
+                            current_since = int(probe[0][0])
+                            found = True
+                            break
+                    if found:
+                        continue
                 break
 
             # Filter to requested date range
@@ -148,7 +185,7 @@ def _fetch_and_save_data(formatted_symbol: str, exchange_id: str, req: Historica
                 break
 
             current_since = last_ts + 1
-            time.sleep(0.2)
+            time.sleep(0.35)
 
         if total_fetched == 0:
             return {
