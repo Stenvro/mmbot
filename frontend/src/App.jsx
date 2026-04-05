@@ -60,7 +60,7 @@ export default function App() {
 
   useEffect(() => {
     refetchBots(); // eslint-disable-line react-hooks/set-state-in-effect -- initial data fetch on mount
-    const botInterval = setInterval(refetchBots, 5000);
+    const botInterval = setInterval(refetchBots, 15000);
 
     const handleOpenBuilder = (e) => {
         setEditingBot(e.detail || null);

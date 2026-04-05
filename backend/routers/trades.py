@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 import io
@@ -22,7 +22,7 @@ router = APIRouter(
 )
 
 @router.get("/positions")
-def get_positions(symbol: str = None, mode: str = None, status: str = None, limit: int = 0, db: Session = Depends(get_db)):
+def get_positions(symbol: str = None, mode: str = None, status: str = None, limit: int = Query(default=5000, le=50000), db: Session = Depends(get_db)):
     query = db.query(Position)
     if symbol:
         formatted_symbol = symbol.replace('-', '/').upper()
@@ -35,7 +35,7 @@ def get_positions(symbol: str = None, mode: str = None, status: str = None, limi
     return query.all()
 
 @router.get("/orders")
-def get_orders(symbol: str = None, mode: str = None, limit: int = 0, db: Session = Depends(get_db)):
+def get_orders(symbol: str = None, mode: str = None, limit: int = Query(default=10000, le=50000), db: Session = Depends(get_db)):
     query = db.query(Order)
     if symbol:
         formatted_symbol = symbol.replace('-', '/').upper()
@@ -99,7 +99,7 @@ def force_close_position(position_id: int, db: Session = Depends(get_db)):
         db.refresh(pos)
 
         # Use the most recent candle close price to calculate realised PnL
-        latest_candle = db.query(Candle).filter(Candle.symbol == pos.symbol).order_by(Candle.timestamp.desc()).first()
+        latest_candle = db.query(Candle).filter(Candle.symbol == pos.symbol, Candle.exchange == (pos.exchange or "okx")).order_by(Candle.timestamp.desc()).first()
         close_price = latest_candle.close if latest_candle else pos.entry_price
 
         profit_abs = (close_price - pos.entry_price) * pos.amount if pos.side == "long" else (pos.entry_price - close_price) * pos.amount
@@ -133,15 +133,22 @@ def force_close_position(position_id: int, db: Session = Depends(get_db)):
 
 @router.get("/export")
 def export_trades_csv(mode: str = "live", db: Session = Depends(get_db)):
-    orders = db.query(Order).filter(Order.mode == mode, Order.status == "filled").order_by(Order.timestamp.desc()).all()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["ID", "Timestamp", "Bot Name", "Symbol", "Side", "Type", "Price", "Amount", "Fee", "Exchange Order ID"])
-    for order in orders:
-        writer.writerow([
-            order.id, order.timestamp.strftime("%Y-%m-%d %H:%M:%S") if order.timestamp else "",
-            order.bot_name, order.symbol, order.side.upper(), order.order_type.upper(),
-            order.price, order.amount, order.fee, order.exchange_order_id or "N/A"
-        ])
-    output.seek(0)
-    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=apexalgo_{mode}_trades.csv"})
+    def generate():
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Timestamp", "Bot Name", "Symbol", "Side", "Type", "Price", "Amount", "Fee", "Exchange Order ID"])
+        yield output.getvalue()
+        output.seek(0)
+        output.truncate()
+
+        for order in db.query(Order).filter(Order.mode == mode, Order.status == "filled").order_by(Order.timestamp.desc()).yield_per(500):
+            writer.writerow([
+                order.id, order.timestamp.strftime("%Y-%m-%d %H:%M:%S") if order.timestamp else "",
+                order.bot_name, order.symbol, order.side.upper(), order.order_type.upper(),
+                order.price, order.amount, order.fee, order.exchange_order_id or "N/A"
+            ])
+            yield output.getvalue()
+            output.seek(0)
+            output.truncate()
+
+    return StreamingResponse(generate(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=apexalgo_{mode}_trades.csv"})

@@ -92,6 +92,48 @@ def run_migrations():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candles_timestamp ON candles (timestamp)"))
                 logger.info("Migration: candles table rebuilt successfully.")
 
+        # ── signals — deduplicate and add unique constraint ────────────────────
+        if "signals" in existing_tables:
+            # Check if the unique constraint already exists by looking for the index
+            sig_indexes = {idx['name'] for idx in inspector.get_indexes('signals')}
+            if 'uq_signal_bot_symbol_ts' not in sig_indexes:
+                logger.info("Migration: rebuilding signals table to add unique constraint...")
+                # Deduplicate: keep the row with the highest id per (bot_name, symbol, timestamp)
+                conn.execute(text("""
+                    DELETE FROM signals WHERE id NOT IN (
+                        SELECT MAX(id) FROM signals GROUP BY bot_name, symbol, timestamp
+                    )
+                """))
+                # Rebuild table with unique constraint
+                conn.execute(text("""
+                    CREATE TABLE signals_migration (
+                        id          INTEGER PRIMARY KEY,
+                        candle_id   INTEGER REFERENCES candles(id) ON DELETE CASCADE,
+                        symbol      TEXT,
+                        timestamp   DATETIME,
+                        bot_name    TEXT,
+                        name        TEXT,
+                        value       REAL,
+                        action      TEXT,
+                        extra_data  JSON DEFAULT '{}',
+                        UNIQUE (bot_name, symbol, timestamp)
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO signals_migration
+                        (id, candle_id, symbol, timestamp, bot_name, name, value, action, extra_data)
+                    SELECT id, candle_id, symbol, timestamp, bot_name, name, value, action, extra_data
+                    FROM signals
+                """))
+                conn.execute(text("DROP TABLE signals"))
+                conn.execute(text("ALTER TABLE signals_migration RENAME TO signals"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_candle_id ON signals (candle_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_symbol    ON signals (symbol)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_timestamp ON signals (timestamp)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_bot_name  ON signals (bot_name)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_signals_name      ON signals (name)"))
+                logger.info("Migration: signals table rebuilt with unique constraint.")
+
         # Composite indexes for hot query paths (idempotent)
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_positions_botname_status ON positions (bot_name, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_posid_side_status ON orders (position_id, side, status)"))

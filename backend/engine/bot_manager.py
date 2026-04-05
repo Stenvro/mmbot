@@ -7,6 +7,7 @@ from hashlib import md5
 import pandas as pd
 import ccxt
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from backend.core.database import SessionLocal
@@ -38,31 +39,46 @@ class BotManager:
         self.running = False
         self.position_states = {}
         self._position_states_lock = asyncio.Lock()
-        self._drawdown_cache = {}  # bot_name -> {peak_pnl, running_pnl, max_dd}
+        self._drawdown_cache = {}  # (bot_name, mode_group) -> {peak_pnl, running_pnl, max_dd}
+        self._deleted_bots = set()  # bot names pending cleanup, skip in processing
+        self._backfilling_bots = set()  # bot names currently in backfill, skip in live processing
 
-    def _get_drawdown(self, bot_name, db):
-        """Return cached drawdown state, lazy-initializing from DB on first access."""
-        if bot_name not in self._drawdown_cache:
-            closed = db.query(Position.profit_abs).filter(
+    def _get_drawdown(self, bot_name, db, mode_group="live", starting_capital=1000.0):
+        """Return cached drawdown state, lazy-initializing from DB on first access.
+        mode_group: "backtest" for backtest-only, "live" for forward_test/paper/live.
+        starting_capital: wallet size used as equity base for percentage calculation."""
+        cache_key = (bot_name, mode_group)
+        if cache_key not in self._drawdown_cache:
+            query = db.query(Position.profit_abs).filter(
                 Position.bot_name == bot_name, Position.status == "closed"
-            ).order_by(Position.closed_at).all()
-            peak = running = dd = 0.0
+            )
+            if mode_group == "backtest":
+                query = query.filter(Position.mode == "backtest")
+            else:
+                query = query.filter(Position.mode.in_(["forward_test", "paper", "live"]))
+            closed = query.order_by(Position.closed_at).all()
+            running = 0.0
+            peak_equity = starting_capital
+            dd = 0.0
             for cp in closed:
                 running += (cp.profit_abs or 0)
-                peak = max(peak, running)
-                if peak > 0:
-                    dd = max(dd, ((peak - running) / peak) * 100)
-            self._drawdown_cache[bot_name] = {"peak_pnl": peak, "running_pnl": running, "max_dd": dd}
-        return self._drawdown_cache[bot_name]
+                equity = starting_capital + running
+                peak_equity = max(peak_equity, equity)
+                if peak_equity > 0:
+                    dd = max(dd, ((peak_equity - equity) / peak_equity) * 100)
+            self._drawdown_cache[cache_key] = {"starting_capital": starting_capital, "peak_equity": peak_equity, "running_pnl": running, "max_dd": dd}
+        return self._drawdown_cache[cache_key]
 
-    def _update_drawdown(self, bot_name, profit_abs):
+    def _update_drawdown(self, bot_name, mode_group, profit_abs):
         """Incrementally update drawdown cache when a position closes."""
-        if bot_name in self._drawdown_cache:
-            s = self._drawdown_cache[bot_name]
+        cache_key = (bot_name, mode_group)
+        if cache_key in self._drawdown_cache:
+            s = self._drawdown_cache[cache_key]
             s["running_pnl"] += (profit_abs or 0)
-            s["peak_pnl"] = max(s["peak_pnl"], s["running_pnl"])
-            if s["peak_pnl"] > 0:
-                s["max_dd"] = max(s["max_dd"], ((s["peak_pnl"] - s["running_pnl"]) / s["peak_pnl"]) * 100)
+            equity = s["starting_capital"] + s["running_pnl"]
+            s["peak_equity"] = max(s["peak_equity"], equity)
+            if s["peak_equity"] > 0:
+                s["max_dd"] = max(s["max_dd"], ((s["peak_equity"] - equity) / s["peak_equity"]) * 100)
 
     async def start(self):
         self.running = True
@@ -276,6 +292,7 @@ class BotManager:
             bot = db.query(BotConfig).filter(BotConfig.id == bot_id).first()
             if not bot or not bot.is_active: return
             _log_name = bot.name
+            self._backfilling_bots.add(bot.name)
 
             is_api_exec = bot.settings.get("api_execution", False)
             has_key = bool(bot.settings.get("api_key_name"))
@@ -555,9 +572,17 @@ class BotManager:
 
                     open_bt_pos = None
 
-                # Commit signals in batches to avoid holding the SQLite write lock too long
+                # Commit signals in batches — INSERT OR IGNORE respects the unique constraint
                 for i in range(0, len(new_signals), 500):
-                    db.bulk_save_objects(new_signals[i:i+500])
+                    batch = new_signals[i:i+500]
+                    for sig in batch:
+                        ts = sig.timestamp
+                        if hasattr(ts, 'to_pydatetime'):
+                            ts = ts.to_pydatetime()
+                        db.execute(
+                            text("INSERT OR IGNORE INTO signals (candle_id, symbol, timestamp, bot_name, name, action, extra_data) VALUES (:cid, :sym, :ts, :bn, :nm, :act, :ed)"),
+                            {"cid": sig.candle_id, "sym": sig.symbol, "ts": str(ts), "bn": sig.bot_name, "nm": sig.name, "act": sig.action, "ed": json.dumps(sig.extra_data)}
+                        )
                     db.commit()
                 # Always commit — positions/orders from the backtest loop need to be persisted
                 # even when there are no new signals
@@ -569,11 +594,26 @@ class BotManager:
                 else:
                     blb.push(bot.name, "INFO", f"Ready: {symbol} | {len(df)} candles | mode={live_mode.upper()}")
 
+            # After all symbols processed, check backtest drawdown across the full bot
+            if run_backtest:
+                max_drawdown_pct = float(bot.settings.get("max_drawdown", 0))
+                if max_drawdown_pct > 0:
+                    self._drawdown_cache.pop((bot.name, "backtest"), None)
+                    bt_capital = float(bot.settings.get("backtest_capital", 1000))
+                    bt_dd = self._get_drawdown(bot.name, db, mode_group="backtest", starting_capital=bt_capital)
+                    if bt_dd["max_dd"] >= max_drawdown_pct:
+                        logger.warning("Bot '%s' backtest drawdown (%.2f%%) exceeds max (%.2f%%), stopping before live", bot.name, bt_dd["max_dd"], max_drawdown_pct)
+                        blb.push(bot.name, "WARN", f"Backtest drawdown {bt_dd['max_dd']:.2f}% >= {max_drawdown_pct:.2f}%, auto-stopping before live")
+                        bot.is_active = False
+                        db.commit()
+                        return
+
         except Exception as e:
             logger.error("Backfill Error: %s", e, exc_info=True)
             blb.push(_log_name, "ERROR", f"Backfill error: {e}")
             db.rollback()
         finally:
+            self._backfilling_bots.discard(_log_name)
             db.close()
 
     async def _process_bots(self, exchange: str, symbol: str, timeframe: str):
@@ -622,15 +662,20 @@ class BotManager:
                 indicator_cache = {}  # fingerprint -> DataFrame with indicators computed
 
                 for bot in matching_bots:
-                    # Max drawdown guard: auto-stop bot if drawdown exceeds threshold
+                    if bot.name in self._deleted_bots or bot.name in self._backfilling_bots:
+                        continue
+
+                    # Max drawdown guard: auto-stop bot if live drawdown exceeds threshold
                     max_drawdown_pct = float(bot.settings.get("max_drawdown", 0))
                     if max_drawdown_pct > 0:
-                        dd_state = self._get_drawdown(bot.name, db)
+                        live_capital = float(bot.settings.get("backtest_capital", 1000))
+                        dd_state = self._get_drawdown(bot.name, db, mode_group="live", starting_capital=live_capital)
                         if dd_state["max_dd"] >= max_drawdown_pct:
                             logger.warning("Bot '%s' hit max drawdown (%.2f%% >= %.2f%%), auto-stopping", bot.name, dd_state["max_dd"], max_drawdown_pct)
                             blb.push(bot.name, "WARN", f"Max drawdown hit ({dd_state['max_dd']:.2f}% >= {max_drawdown_pct:.2f}%), auto-stopping")
                             bot.is_active = False
-                            self._drawdown_cache.pop(bot.name, None)
+                            self._drawdown_cache.pop((bot.name, "live"), None)
+                            self._drawdown_cache.pop((bot.name, "backtest"), None)
                             db.commit()
                             continue
 
@@ -675,13 +720,13 @@ class BotManager:
                             blb.push(bot.name, "WARN", f"API key '{bot.settings.get('api_key_name')}' not found, running as forward_test")
 
                     # Cache exchange instance per bot cycle to avoid repeated connections
-                    _cached_exchange = None
-                    def get_exchange():
-                        nonlocal _cached_exchange
-                        if _cached_exchange is None and api_key_record:
-                            _cached_exchange = self._get_ccxt_instance(api_key_record)
-                            _cached_exchange.load_markets()
-                        return _cached_exchange
+                    _cached_ccxt = None
+                    def get_ccxt():
+                        nonlocal _cached_ccxt
+                        if _cached_ccxt is None and api_key_record:
+                            _cached_ccxt = self._get_ccxt_instance(api_key_record)
+                            _cached_ccxt.load_markets()
+                        return _cached_ccxt
 
                     max_pos = int(bot.settings.get("max_positions", 1))
                     scope = bot.settings.get("max_positions_scope", "per_pair")
@@ -731,8 +776,8 @@ class BotManager:
 
                                 buy_fee = 0.0
                                 if mode in ["paper", "live"] and api_key_record:
-                                    exchange = get_exchange()
-                                    trade_amount = float(exchange.amount_to_precision(ccxt_symbol, trade_amount))
+                                    ccxt_inst = get_ccxt()
+                                    trade_amount = float(ccxt_inst.amount_to_precision(ccxt_symbol, trade_amount))
                                     if trade_amount <= 0:
                                         logger.warning("Trade amount rounded to zero for %s after precision, skipping", ccxt_symbol)
                                         continue
@@ -743,7 +788,7 @@ class BotManager:
                                         if order_value_usd > max_order_usd:
                                             logger.warning("SAFETY: BUY order $%.2f exceeds max_order_value $%.2f for %s. Skipping.", order_value_usd, max_order_usd, symbol)
                                             continue
-                                    okx_order = exchange.create_market_buy_order(ccxt_symbol, trade_amount)
+                                    okx_order = ccxt_inst.create_market_buy_order(ccxt_symbol, trade_amount)
                                     logger.info("%s BUY response: id=%s status=%s filled=%s avg=%s fee=%s",
                                         mode.upper(), okx_order.get("id"), okx_order.get("status"),
                                         okx_order.get("filled"), okx_order.get("average"), okx_order.get("fee"))
@@ -806,12 +851,12 @@ class BotManager:
 
                                 actual_fee = 0.0
                                 if mode in ["paper", "live"] and api_key_record:
-                                    exchange = get_exchange()
-                                    close_qty = float(exchange.amount_to_precision(ccxt_symbol, close_qty))
+                                    ccxt_inst = get_ccxt()
+                                    close_qty = float(ccxt_inst.amount_to_precision(ccxt_symbol, close_qty))
                                     if close_qty <= 0:
                                         logger.warning("Sell amount rounded to zero for %s after precision, skipping", ccxt_symbol)
                                         continue
-                                    okx_order = exchange.create_market_sell_order(ccxt_symbol, close_qty)
+                                    okx_order = ccxt_inst.create_market_sell_order(ccxt_symbol, close_qty)
                                     logger.info("%s SELL response: id=%s status=%s filled=%s avg=%s fee=%s",
                                         mode.upper(), okx_order.get("id"), okx_order.get("status"),
                                         okx_order.get("filled"), okx_order.get("average"), okx_order.get("fee"))
@@ -846,7 +891,7 @@ class BotManager:
                                 if close_qty >= pos.amount - 0.00001:
                                     pos.status = "closed"
                                     pos.closed_at = latest_time
-                                    self._update_drawdown(bot.name, pos.profit_abs)
+                                    self._update_drawdown(bot.name, "live", pos.profit_abs)
                                     if pos.id in self.position_states:
                                         del self.position_states[pos.id]
                                 else:
@@ -865,8 +910,17 @@ class BotManager:
                     existing_signal = db.query(Signal).filter(Signal.bot_name == bot.name, Signal.symbol == symbol, Signal.timestamp == latest_time).first()
                     if not existing_signal and indicators:
                         action_str = "buy" if is_buy else ("sell" if is_sell else "neutral")
-                        db.add(Signal(candle_id=int(latest_row['id']), symbol=symbol, timestamp=latest_time, bot_name=bot.name, name="STRATEGY_TICK", action=action_str, extra_data=indicators))
-                        db.commit()
+                        try:
+                            live_ts = latest_time
+                            if hasattr(live_ts, 'to_pydatetime'):
+                                live_ts = live_ts.to_pydatetime()
+                            db.execute(
+                                text("INSERT OR IGNORE INTO signals (candle_id, symbol, timestamp, bot_name, name, action, extra_data) VALUES (:cid, :sym, :ts, :bn, :nm, :act, :ed)"),
+                                {"cid": int(latest_row['id']), "sym": symbol, "ts": str(live_ts), "bn": bot.name, "nm": "STRATEGY_TICK", "act": action_str, "ed": json.dumps(indicators)}
+                            )
+                            db.commit()
+                        except IntegrityError:
+                            db.rollback()
 
             except Exception as e:
                 logger.error("Error executing live bot strategy: %s", e, exc_info=True)
@@ -875,6 +929,16 @@ class BotManager:
                 db.close()
 
         await asyncio.to_thread(run_logic)
+
+    def mark_deleted(self, bot_name: str):
+        """Mark a bot as deleted so _process_bots skips it."""
+        self._deleted_bots.add(bot_name)
+        self._drawdown_cache.pop((bot_name, "live"), None)
+        self._drawdown_cache.pop((bot_name, "backtest"), None)
+
+    def unmark_deleted(self, bot_name: str):
+        """Remove deletion marker after cleanup is complete."""
+        self._deleted_bots.discard(bot_name)
 
     def stop(self):
         self.running = False

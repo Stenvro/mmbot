@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import asyncio
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -228,7 +228,7 @@ def delete_data(
 @router.get("/candles/{symbol}")
 def get_candles(
     symbol: str,
-    limit: Optional[int] = None,
+    limit: Optional[int] = Query(default=None, le=100000),
     exchange: Optional[str] = None,
     x_timeframe: str = Header(...),
     db: Session = Depends(get_db)

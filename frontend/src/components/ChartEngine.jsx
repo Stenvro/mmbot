@@ -54,7 +54,8 @@ export default function ChartEngine({ dataset }) {
   const markersPluginRef = useRef(null);  
   const priceLinesRef = useRef([]);  
   const lastCandleRef = useRef(null);  
-  const isCrosshairActive = useRef(false); 
+  const isCrosshairActive = useRef(false);
+  const lastSignalIdRef = useRef(0); 
    
   const [candleTimes, setCandleTimes] = useState([]); 
   const [loading, setLoading] = useState(true); 
@@ -154,27 +155,37 @@ export default function ChartEngine({ dataset }) {
     } catch (e) { console.error("Error setting up configs", e); } 
   }; 
 
-  const pollData = async () => { 
-    try { 
-      const safeSymbol = dataset.symbol.replace('/', '-'); 
-      const [sigRes, ordRes, posRes] = await Promise.all([ 
-          apiClient.get(`/api/bots/signals`, { params: { symbol: dataset.symbol, timeframe: dataset.timeframe, limit: 100000 } }), 
-          apiClient.get(`/api/trades/orders`, { params: { symbol: safeSymbol, limit: 100000 } }), 
-          apiClient.get(`/api/trades/positions`, { params: { symbol: safeSymbol, limit: 100000 } }) 
-      ]); 
-      
-      setSignals(prev => {
-          const next = sigRes.data || [];
-          if (prev.length === next.length && prev.length > 0 && prev[prev.length-1].id === next[next.length-1].id) return prev;
-          return next;
-      });
+  const pollData = async () => {
+    try {
+      const safeSymbol = dataset.symbol.replace('/', '-');
+      const sigParams = { symbol: dataset.symbol, timeframe: dataset.timeframe, limit: 5000 };
+      if (lastSignalIdRef.current > 0) sigParams.since_id = lastSignalIdRef.current;
+
+      const [sigRes, ordRes, posRes] = await Promise.all([
+          apiClient.get(`/api/bots/signals`, { params: sigParams }),
+          apiClient.get(`/api/trades/orders`, { params: { symbol: safeSymbol, limit: 1000 } }),
+          apiClient.get(`/api/trades/positions`, { params: { symbol: safeSymbol, limit: 1000 } })
+      ]);
+
+      const newSigs = sigRes.data || [];
+      if (newSigs.length > 0) {
+          const maxId = Math.max(...newSigs.map(s => s.id));
+          if (lastSignalIdRef.current > 0) {
+              // Incremental: merge new signals into existing
+              setSignals(prev => [...prev, ...newSigs]);
+          } else {
+              // Initial full load
+              setSignals(newSigs);
+          }
+          lastSignalIdRef.current = maxId;
+      }
       setOrders(prev => {
           const next = ordRes.data || [];
           if (prev.length === next.length && prev.length > 0 && prev[prev.length-1].id === next[next.length-1].id) return prev;
           return next;
       });
-      setPositions(posRes.data || []); 
-    } catch (e) { console.error("Data Fetch Error:", e); } 
+      setPositions(posRes.data || []);
+    } catch (e) { console.error("Data Fetch Error:", e); }
   }; 
 
   const applyInitialDataToChart = (rawData) => { 
@@ -260,6 +271,7 @@ export default function ChartEngine({ dataset }) {
       try {
         setLoading(true);
         setErrorMsg(null);
+        lastSignalIdRef.current = 0;
         const chart = createChart(chartContainerRef.current, {
           // --- APEXALGO DARK THEME ---
           layout: { background: { type: 'solid', color: '#080a0f' }, textColor: '#7d8598' },
@@ -286,7 +298,7 @@ export default function ChartEngine({ dataset }) {
 
         const response = await apiClient.get(`/api/data/candles/${dataset.symbol.replace('/', '-')}`, {
             headers: { 'x-timeframe': dataset.timeframe },
-            params: { limit: 100000 },
+            params: { limit: 10000 },
             signal
         });
 
@@ -319,7 +331,7 @@ export default function ChartEngine({ dataset }) {
 
     initChart();
     const pollInterval = setInterval(updateLatestCandles, 5000);
-    const signalInterval = setInterval(pollData, 5000);
+    const signalInterval = setInterval(pollData, 15000);
 
     return () => {
       abortController.abort();

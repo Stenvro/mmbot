@@ -28,7 +28,7 @@ The flow is always: **Indicator/Price Data --> Condition --> Logic Gate (optiona
 - Max positions: number of concurrent open positions allowed
 - Position limit scope: `per_pair` (e.g. 1x BTC + 1x ETH) or `global` (total across all pairs)
 - Cooldown: max N new entries per X candles (0 = off)
-- Max drawdown %: auto-stops bot when cumulative loss exceeds threshold (0 = off)
+- Max drawdown %: auto-stops bot when equity drawdown from peak exceeds threshold (0 = off). Checked separately for backtest (stops before going live) and live modes. Calculated as `(peak_equity - current_equity) / peak_equity * 100` where equity = starting capital + cumulative P&L
 - Max order value USD: rejects live orders above this dollar amount (0 = off)
 - Execution mode: `Paper Trading` (simulated) or `Live Exchange` (real orders)
 

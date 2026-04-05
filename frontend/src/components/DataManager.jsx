@@ -115,7 +115,7 @@ export default function DataManager({ openChart, setError }) {
   const executeDelete = async (delSymbol, delTimeframe, beforeDateStr) => {
     setLoading(true);
     try {
-      let endpoint = `/api/data?symbol=${delSymbol}&timeframe=${delTimeframe}`;
+      let endpoint = `/api/data?symbol=${encodeURIComponent(delSymbol)}&timeframe=${delTimeframe}`;
       if (beforeDateStr && beforeDateStr.trim() !== "") {
           const isoDate = new Date(beforeDateStr).toISOString();
           endpoint += `&before_date=${isoDate}`;
@@ -168,7 +168,7 @@ export default function DataManager({ openChart, setError }) {
             setLoading(true);
             try {
                 await Promise.all(filteredData.map(row =>
-                    apiClient.delete(`/api/data?symbol=${row.symbol.replace('/', '-')}&timeframe=${row.timeframe}`)
+                    apiClient.delete(`/api/data?symbol=${encodeURIComponent(row.symbol)}&timeframe=${row.timeframe}`)
                 ));
                 fetchSummary();
                 setModalConfig({ type: 'success', title: 'Database Wiped', message: `Successfully deleted all data matching your filters.`, confirmText: 'OK', onConfirm: () => setModalConfig(null) });

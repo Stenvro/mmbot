@@ -17,6 +17,7 @@ from backend.models.positions import Position
 from backend.core.events import event_bus
 from backend.core.security import verify_api_key
 from backend.engine.settings_validator import validate_bot_settings
+from backend.engine.bot_manager import bot_manager
 from backend.core import bot_log_buffer as blb
 from backend.models.bot_logs import BotLog
 
@@ -50,22 +51,25 @@ def get_all_bots(db: Session = Depends(get_db)):
     return db.query(BotConfig).all()
 
 @router.get("/signals")
-def get_bot_signals(symbol: str, timeframe: str, limit: int = 100000, db: Session = Depends(get_db)):
-    all_bots = db.query(BotConfig).all()
+def get_bot_signals(symbol: str, timeframe: str, limit: int = Query(default=5000, le=200000), since_id: int = Query(default=0, ge=0), db: Session = Depends(get_db)):
+    bot_rows = db.query(BotConfig.name, BotConfig.settings).all()
 
     valid_bot_names = [
-        bot.name for bot in all_bots
-        if bot.settings and bot.settings.get('timeframe') == timeframe and (symbol in bot.settings.get('symbols', []) or symbol == bot.settings.get('symbol'))
+        name for name, settings in bot_rows
+        if settings and settings.get('timeframe') == timeframe and (symbol in settings.get('symbols', []) or symbol == settings.get('symbol'))
     ]
 
     if not valid_bot_names:
         return []
 
-    signals = db.query(Signal).filter(
+    query = db.query(Signal).filter(
         Signal.symbol == symbol,
         Signal.bot_name.in_(valid_bot_names)
-    ).order_by(Signal.timestamp.desc()).limit(limit).all()
+    )
+    if since_id > 0:
+        query = query.filter(Signal.id > since_id)
 
+    signals = query.order_by(Signal.timestamp.desc()).limit(limit).all()
     signals.reverse()
 
     result = []
@@ -79,16 +83,8 @@ def get_bot_signals(symbol: str, timeframe: str, limit: int = 100000, db: Sessio
             "name": s.name,
             "action": s.action,
             "value": s.value,
+            "extra_data": s.extra_data if isinstance(s.extra_data, dict) else (json.loads(s.extra_data) if isinstance(s.extra_data, str) else {})
         }
-
-        try:
-            if isinstance(s.extra_data, str):
-                signal_dict["extra_data"] = json.loads(s.extra_data)
-            else:
-                signal_dict["extra_data"] = s.extra_data or {}
-        except (json.JSONDecodeError, TypeError):
-            signal_dict["extra_data"] = {}
-
         result.append(signal_dict)
 
     return result
@@ -235,6 +231,7 @@ def _cleanup_bot_data(bot_name: str):
         logger.error("Background cleanup failed for '%s': %s", bot_name, e)
     finally:
         db.close()
+        bot_manager.unmark_deleted(bot_name)
 
 @router.delete("/{bot_id}")
 def delete_bot(bot_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -246,6 +243,7 @@ def delete_bot(bot_id: int, background_tasks: BackgroundTasks, db: Session = Dep
         raise HTTPException(status_code=400, detail="Cannot delete a running bot. Stop it first.")
 
     bot_name = bot.name
+    bot_manager.mark_deleted(bot_name)
     db.delete(bot)
     db.commit()
 

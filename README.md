@@ -47,8 +47,11 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **Incremental Backfill Commits** — candle data is committed to the database after each exchange batch, not all at once; eliminates startup race conditions when multiple bots start simultaneously
 - **Indicator Fingerprinting** — bots sharing the same indicator configuration reuse computed results via MD5-based fingerprint keys, avoiding redundant pandas_ta calls in the live processing loop
 - **Evaluator Memoization** — `resolve_node()` caches resolved Series per evaluation cycle so diamond-shaped node graphs don't recompute shared indicator nodes
-- **Drawdown Caching** — cumulative drawdown is lazy-initialized from the database and updated incrementally on position close, replacing per-candle aggregate queries
-- **Composite Indexes** — dedicated indexes on orders (cooldown checks) and candles (lookup by exchange/symbol/timeframe/timestamp) for hot-path query performance
+- **Drawdown Caching** — drawdown is tracked per `(bot, mode_group)` with separate backtest and live caches. Calculated as equity-based drawdown (starting capital + cumulative P&L), not PnL-only. Lazy-initialized from DB, updated incrementally on position close
+- **Backfill Lock** — `_backfilling_bots` set prevents live processing from creating duplicate signals while a bot is mid-backfill
+- **Signal Deduplication** — unique constraint on `(bot_name, symbol, timestamp)` with `INSERT OR IGNORE` prevents duplicate signals on bot restart
+- **Incremental Signal Polling** — ChartEngine uses `since_id` to fetch only new signals after initial load, reducing per-poll payload from thousands of rows to near-zero
+- **Composite Indexes** — dedicated indexes on orders (cooldown checks), candles (lookup by exchange/symbol/timeframe/timestamp), and signals (unique constraint) for hot-path query performance
 - **Batched Exchange Key Loading** — exchange keys are fetched once per processing cycle with a single `IN` query instead of per-bot lookups
 - **Eager-Loaded Queries** — `selectinload` on Position → Orders avoids N+1 query overhead in hot paths
 - **Numpy-Backed Backtest Loop** — indicator and signal arrays are pre-extracted from DataFrames before the per-candle iteration
@@ -70,7 +73,7 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 - **ATR & Trailing Stops** — dynamic stop-loss adjustment based on price action
 - **Trade Cooldown** — configurable max entries per N candles
 - **Position Limits** — per-pair or global max concurrent positions
-- **Max Drawdown Auto-Stop** — halts bot when cumulative drawdown exceeds threshold
+- **Max Drawdown Auto-Stop** — halts bot when equity drawdown from peak exceeds threshold; backtest drawdown checked before going live, live drawdown tracked separately
 - **Max Order Value Guard** — rejects live orders exceeding a configurable USD limit
 
 ### Order Safety
@@ -87,7 +90,7 @@ ApexAlgo is a full-stack algorithmic trading platform for building, backtesting,
 
 ### Analytics
 - **Equity Curve** — inline SVG cumulative P&L chart over time (no external chart library)
-- **Buy & Hold Comparison** — per-symbol strategy return vs. passive buy-and-hold; strategy % is the sum of per-trade returns (so the denominator is per-dollar-deployed per trade, not total capital rotated); reference price always anchored to the true first entry across all positions (open and closed)
+- **Buy & Hold Comparison** — per-symbol strategy return vs. passive buy-and-hold; strategy % is `total_absolute_pnl / total_capital_deployed * 100`, correctly handling multi-bot views; reference price always anchored to the true first entry across all positions (open and closed)
 - **8-Metric Stats Strip** — Net P&L, Win Rate, Profit Factor, Max Drawdown (absolute dollars, peak-to-trough), Avg Hold Time, Total Fees, Return/Risk ratio
 - **Avg Hold Time** — computed from entry order timestamps as fallback for backtests where position `created_at` reflects wall-clock run time rather than the candle entry time
 - **Exchange Filter** — filter all analytics sections by exchange, bot, symbol, or execution mode

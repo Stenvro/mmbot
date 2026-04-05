@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { apiClient } from '../api/client';
 import PageShell from './ui/PageShell';
 import Modal from './ui/Modal';
@@ -178,11 +178,14 @@ export default function TradeManager({ setError }) {
         fetchAllData(); // eslint-disable-line react-hooks/set-state-in-effect
     }, [fetchAllData]);
 
+    const positionsRef = useRef(positions);
+    positionsRef.current = positions;
+
     useEffect(() => {
         if (positions.length === 0) return;
-        const t = setInterval(() => fetchLivePrices(positions), 10000);
+        const t = setInterval(() => fetchLivePrices(positionsRef.current), 10000);
         return () => clearInterval(t);
-    }, [positions, fetchLivePrices]);
+    }, [positions.length, fetchLivePrices]);
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -235,12 +238,14 @@ export default function TradeManager({ setError }) {
             confirmText: 'DELETE ALL FILTERED',
             onConfirm: async () => {
                 setLoading(true);
-                try {
-                    await Promise.all(closedPositions.map(p => apiClient.delete(`/api/trades/positions/${p.id}`)));
-                    fetchAllData();
+                const results = await Promise.allSettled(closedPositions.map(p => apiClient.delete(`/api/trades/positions/${p.id}`)));
+                const failed = results.filter(r => r.status === 'rejected').length;
+                const succeeded = results.length - failed;
+                fetchAllData();
+                if (failed > 0) {
+                    setModalConfig({ type: 'warning', title: 'Partial Delete', message: `Deleted ${succeeded} trades, ${failed} failed.`, confirmText: 'OK', onConfirm: () => setModalConfig(null) });
+                } else {
                     setModalConfig(null);
-                } catch {
-                    setModalConfig({ type: 'danger', title: 'Error', message: 'Some trades failed to delete.', confirmText: 'OK', onConfirm: () => setModalConfig(null) });
                 }
                 setLoading(false);
             },
@@ -393,11 +398,10 @@ export default function TradeManager({ setError }) {
             .filter(([, d]) => d.positions.length > 0)
             .map(([symbol, d]) => {
                 const strategyPnl = d.positions.reduce((s, p) => s + (p.profit_abs || 0), 0);
-                // Sum per-trade returns so the denominator is per-dollar-deployed per trade,
-                // making it comparable to B&H which also measures return on a single deployed sum.
-                // Dividing by totalInvested (sum of all position values) would dilute the result
-                // proportionally to trade count, producing near-zero % for active strategies.
-                const strategyPct = d.positions.reduce((s, p) => s + (p.profit_pct || 0), 0);
+                // Strategy % = total absolute PnL / total capital deployed.
+                // This correctly handles multi-bot: 3 bots × $1000 losing $1500 = -50%, not -150%.
+                const totalCapital = d.positions.reduce((s, p) => s + ((p.entry_price || 0) * (p.amount || 0)), 0);
+                const strategyPct = totalCapital > 0 ? (strategyPnl / totalCapital) * 100 : 0;
                 const curPrice = livePrices[symbol];
                 const bhPct = (curPrice && d.firstPrice > 0)
                     ? ((curPrice - d.firstPrice) / d.firstPrice) * 100

@@ -1,6 +1,8 @@
 import logging
+import os
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -53,13 +55,15 @@ app = FastAPI(
     swagger_ui_init_oauth={"clientId": "test"},
     lifespan=lifespan
 )
+cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Connect routers to the main application
 app.include_router(keys.router)
 app.include_router(data.router)
